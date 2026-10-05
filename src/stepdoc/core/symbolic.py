@@ -422,6 +422,10 @@ def _render(node: ast.expr) -> tuple[str, str, bool]:
     ):
         text = _unparse(node)
         return text, text, True
+    name = _value_call_name(node)
+    if name is not None:
+        text = f"<{name}>"
+        return text, text, False
     if isinstance(node, ast.Dict) and all(k is not None for k in node.keys):
         parts = []
         literal = True
@@ -456,6 +460,23 @@ def _render(node: ast.expr) -> tuple[str, str, bool]:
         return f'"{raw}"', raw, False
     text = f"<{_unparse(node)}>"
     return text, text, False
+
+
+def _value_call_name(node: ast.expr) -> Optional[str]:
+    """``stepdoc.value("name", x)`` or ``value("name", x)`` in the source (SYM-4)."""
+    if not isinstance(node, ast.Call) or len(node.args) != 2 or node.keywords:
+        return None
+    func = node.func
+    named = (isinstance(func, ast.Name) and func.id == "value") or (
+        isinstance(func, ast.Attribute)
+        and func.attr == "value"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "stepdoc"
+    )
+    first = node.args[0]
+    if named and isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return None
 
 
 def assert_source(tb: Any) -> Optional[str]:

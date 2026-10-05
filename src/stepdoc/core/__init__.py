@@ -12,6 +12,7 @@ from .recorder import (
     record_action,
     register_check_converter,
     step,
+    value,
 )
 from .redaction import configure_redaction
 from .symbolic import look_through, set_skip_modules, skip_modules
@@ -39,4 +40,5 @@ __all__ = [
     "skip_modules",
     "step",
     "to_dict",
+    "value",
 ]

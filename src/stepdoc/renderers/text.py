@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .common import OUTCOME_TEXT, Record, procedures, report_lines
+from .common import OUTCOME_TEXT, Record, procedure_lines, procedures, report_lines
 
 
 def render_procedure(record: Record) -> str:
@@ -15,10 +15,16 @@ def render_procedure(record: Record) -> str:
             width = max(len(n) for n in params)
             for name, values in params.items():
                 out.append(f"  {name.ljust(width)}   {', '.join(values)}")
+        if proc.setup is not None:
+            out.extend(procedure_lines(proc.setup, ("setup",)))
         for lines, members in proc.variants:
             if len(proc.variants) > 1:
                 out.append(f"Variant for: {', '.join(m['case'] or m['id'] for m in members)}")
+            elif proc.setup is not None or proc.teardown is not None:
+                out.append("Procedure")
             out.extend(lines)
+        if proc.teardown is not None:
+            out.extend(procedure_lines(proc.teardown, ("teardown",)))
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 

@@ -172,3 +172,96 @@ def test_skip_modules_ini(pytester):
     run(pytester, "--stepdoc-record=run.json").assert_outcomes(passed=1)
     (test,) = json.loads((pytester.path / "run.json").read_text())["tests"]
     assert test["unscoped"][0]["value"]["symbolic"] == "<w>"
+
+
+FIXTURE_TESTS = '''
+import pytest
+import stepdoc
+from stepdoc import step
+
+
+@pytest.fixture(scope="session")
+def bench(dev):
+    with step("Power up bench"):
+        dev.write("bench.power", 1)
+    yield
+    with step("Power down bench"):
+        dev.write("bench.power", 0)
+
+
+@pytest.fixture
+def configured(dev, bench):
+    dev.write("ctrl.reset", 1)  # outside any step: unscoped, in Setup
+    with step("Configure"):
+        dev.write("ctrl.mode", 2)
+    yield
+    with step("Restore"):
+        dev.write("ctrl.mode", 0)
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_with_fixtures(dev, configured, level):
+    with step("Set level"):
+        dev.write("dac.level", level)
+        assert dev.read("dac.level") == level
+'''
+
+
+READS = """
+    def read(self, reg):
+        value = self.regs.get(reg, 0)
+        for hook in self.read_hooks:
+            hook(reg, value)
+        return value
+"""
+
+FIXTURE_CONFTEST = CONFTEST.replace(
+    "@pytest.fixture\ndef dev", '@pytest.fixture(scope="session")\ndef dev'
+).replace(
+    "    d.simulated",
+    '    d.read_hooks = [lambda reg, val: stepdoc.record_action(reg, "read", val)]\n    d.simulated',
+)
+
+
+@pytest.fixture
+def fixture_project(pytester):
+    pytester.makeconftest(FIXTURE_CONFTEST)
+    driver = DRIVER.split("    def read(self, reg):")[0] + READS
+    pytester.makepyfile(test_fx=FIXTURE_TESTS, mydevice=driver)
+    pytester.makeini("[pytest]\nenable_assertion_pass_hook = true\nstepdoc_skip_modules = mydevice\n")
+    return pytester
+
+
+def test_fixture_steps_go_to_setup_and_teardown(fixture_project):
+    result = run(fixture_project, "--stepdoc-record=run.json", "--stepdoc-procedure=procedure.md")
+    result.assert_outcomes(passed=2)
+    record = json.loads((fixture_project.path / "run.json").read_text())
+    jsonschema.validate(record, SCHEMA)
+    first, second = record["tests"]
+
+    def numbered(test):
+        return [(s["section"], s["number"], s["title"]) for s in test["steps"]]
+
+    assert numbered(first) == [
+        ("setup", "S1", "Power up bench"),
+        ("setup", "S2", "Configure"),
+        ("procedure", "1", "Set level"),
+        ("teardown", "T1", "Restore"),
+    ]
+    # The session fixture tears down after the last test only.
+    assert numbered(second)[-2:] == [("teardown", "T1", "Restore"), ("teardown", "T2", "Power down bench")]
+    assert first["unscoped"][0]["section"] == "setup"
+
+    # The passing assert absorbed the read on its line (ACT-5).
+    set_level = first["steps"][2]["entries"]
+    assert [e["type"] for e in set_level] == ["action", "check"]
+    check = set_level[1]
+    assert check["number"] == "1.2" and check["passed"] is True
+    assert [(r["target"]["concrete"], r["value"]["concrete"]) for r in check["reads"]] == [("dac.level", 1)]
+
+    # One procedure for both cases, with the fullest setup and teardown.
+    procedure = (fixture_project.path / "procedure.md").read_text()
+    assert "Procedure for" not in procedure
+    for text in ("**Setup**", "**S1. Power up bench**", "**Procedure**", "**T2. Power down bench**"):
+        assert text in procedure
+    assert procedure.index("**S2. Configure**") < procedure.index("**1. Set level**") < procedure.index("**T1. Restore**")

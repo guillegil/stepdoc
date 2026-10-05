@@ -79,6 +79,16 @@ def action_line(a: Record, symbolic: bool, depth: int) -> Line:
             result = show(meta["status"])
 
     op = a["op"]
+    count = a.get("count", 1)
+    if count > 1:  # ACT-4: a polling loop, one line
+        if not symbolic:
+            noun = "reads" if direction == "out" else "calls"
+            spent = ""
+            if a.get("t_last") is not None and a.get("t") is not None:
+                spent = f", {(a['t_last'] - a['t']) * 1000:.0f} ms"
+            result = f"{result} ({count} {noun}{spent})" if result else f"({count} {noun}{spent})"
+        code = f"{target}  {value}".rstrip() if op in _BARE_OPS else f"{target} {value}".rstrip()
+        return Line(a.get("number"), "Poll", code, result, note=note, depth=depth)
     if direction == "in" and op in _ASSIGN_OPS:
         verb, code = "", f"{target} = {value}" if value else target
     elif op in _BARE_OPS:
@@ -95,6 +105,14 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
         mark = {True: "✓", False: "✗", None: "·"}[c["passed"]]
         if c.get("actual") is not None:
             result = f"got {show(c['actual'])}"
+        elif c.get("reads"):  # ACT-5: the reads that fed the check
+            reads = c["reads"]
+            if len(reads) == 1:
+                result = f"got {show(reads[0]['value']['concrete'])}"
+            else:
+                result = "got " + ", ".join(
+                    f"{r['target']['concrete']} = {show(r['value']['concrete'])}" for r in reads
+                )
     code = c["text"]
     if c.get("selected"):
         code += f" [→ {c['selected']}]"
@@ -127,13 +145,35 @@ def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
     yield from entry_lines(s["entries"], symbolic, depth + 1)
 
 
-def test_lines(test: Record, symbolic: bool) -> list[Line]:
+SECTIONS = ("setup", "procedure", "teardown")
+SECTION_TITLE = {"setup": "Setup", "procedure": "Procedure", "teardown": "Teardown"}
+
+
+def has_section(test: Record, section: str) -> bool:
+    return any(e.get("section", "procedure") == section for e in test["steps"] + test["unscoped"])
+
+
+def test_lines(test: Record, symbolic: bool, sections: tuple[str, ...] = SECTIONS) -> list[Line]:
+    """Lines of one test. Setup and teardown (STEP-8) get a heading; the procedure
+    gets one only when the test has a setup or teardown section to tell it apart."""
     lines: list[Line] = []
-    if test["unscoped"]:
-        lines.append(Line(None, "", "Unscoped", is_step=True))
-        lines.extend(entry_lines(test["unscoped"], symbolic, 1))
-    for s in test["steps"]:
-        lines.extend(step_lines(s, symbolic))
+    framed = any(has_section(test, s) for s in ("setup", "teardown"))
+    for section in sections:
+        steps = [s for s in test["steps"] if s.get("section", "procedure") == section]
+        loose = [e for e in test["unscoped"] if e.get("section", "procedure") == section]
+        if not steps and not loose:
+            continue
+        if section != "procedure":
+            lines.append(Line(None, "", SECTION_TITLE[section], is_step=True))
+            lines.extend(entry_lines(loose, symbolic, 1))
+        else:
+            if framed and len(sections) > 1:
+                lines.append(Line(None, "", SECTION_TITLE[section], is_step=True))
+            if loose:
+                lines.append(Line(None, "", "Unscoped", is_step=True))
+                lines.extend(entry_lines(loose, symbolic, 1))
+        for s in steps:
+            lines.extend(step_lines(s, symbolic))
     return lines
 
 
@@ -146,8 +186,8 @@ def plain(line: Line) -> str:
     return "   " * line.depth + head + body
 
 
-def procedure_lines(test: Record) -> list[str]:
-    return [plain(line) for line in test_lines(test, symbolic=True)]
+def procedure_lines(test: Record, sections: tuple[str, ...] = SECTIONS) -> list[str]:
+    return [plain(line) for line in test_lines(test, symbolic=True, sections=sections)]
 
 
 def report_lines(test: Record) -> list[str]:
@@ -169,8 +209,13 @@ class Procedure:
     procedure_id: str
     cases: list[Record]
     variants: list[tuple[list[str], list[Record]]]
-    """Distinct procedures among the cases, with the cases that follow each. More
-    than one variant means the code took different paths for different values."""
+    """Distinct procedures among the cases (procedure section only), with the cases
+    that follow each. More than one variant means the code took different paths
+    for different values."""
+    setup: Optional[Record] = None
+    """The case with the fullest setup section: session-scoped fixtures only set up
+    in the first test that uses them."""
+    teardown: Optional[Record] = None
 
     @property
     def params(self) -> dict[str, list[str]]:
@@ -192,7 +237,7 @@ def procedures(record: Record) -> list[Procedure]:
     for pid, cases in groups.items():
         variants: list[tuple[list[str], list[Record]]] = []
         for case in cases:
-            lines = procedure_lines(case)
+            lines = procedure_lines(case, ("procedure",))
             for i, (known, members) in enumerate(variants):
                 # A case that stopped early (a failure) follows the longer procedure.
                 if known[: len(lines)] == lines:
@@ -203,8 +248,15 @@ def procedures(record: Record) -> list[Procedure]:
                     break
             else:
                 variants.append((lines, [case]))
-        result.append(Procedure(pid, cases, variants))
+        result.append(
+            Procedure(pid, cases, variants, _fullest(cases, "setup"), _fullest(cases, "teardown"))
+        )
     return result
+
+
+def _fullest(cases: list[Record], section: str) -> Optional[Record]:
+    best = max(cases, key=lambda c: len(procedure_lines(c, (section,))))
+    return best if has_section(best, section) else None
 
 
 def short_name(procedure_id: str) -> str:

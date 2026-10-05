@@ -75,4 +75,4 @@ def test_non_json_values_are_tagged():
 
 
 def test_dumps_is_valid_json(dev, api):
-    assert json.loads(dumps(make_record(dev, api)))["schema_version"] == "0.1"
+    assert json.loads(dumps(make_record(dev, api)))["schema_version"] == "0.2"

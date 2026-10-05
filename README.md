@@ -79,6 +79,21 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
    `enable_assertion_pass_hook = true`), `step("…", check=...)` and
    `stepdoc.attach_check(...)`. stepdoc never compares values itself.
 
+### Keeping documents readable
+
+- **Setup and teardown.** Steps run by fixtures go into a Setup section (S1, S2…)
+  and a Teardown section (T1…), apart from the test's own steps.
+- **Polling.** The same read (or the same request) repeated from one source line,
+  such as `while not dev.map.status.pll_locked: ...`, becomes one line:
+  `Poll dev.map.status.pll_locked`, and in the report `-> True (37 reads, 18 ms)`.
+  Turn it off with `stepdoc_collapse_repeats = false`.
+- **Reads inside checks.** A read on the same line as an `assert` is shown on the
+  check's line: `Verify dev.map.adc.value == 1024 -> got 1024`.
+- **Quiet helpers.** `@step("Reset device", record=False)` keeps the step and its
+  checks but drops the actions inside it.
+- **Naming a value.** `stepdoc.value("code", level * 2)` returns the value and shows
+  it as `<code>` in the procedure, also when it travels through a helper first.
+
 ### Bridges
 
 ```python
@@ -132,10 +147,11 @@ enable_assertion_pass_hook = true
 | `--stepdoc-report=PATH` | Write the executed report (Markdown) |
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
+| `stepdoc_collapse_repeats` (ini) | Collapse polling into one line (default `true`) |
 
 Without any of these options the plugin records nothing and prints nothing.
 
-The `stepdoc_dry_run` fixture (or `stepdoc.is_dry_run(config)`) tells your fixtures
+The session-scoped `stepdoc_dry_run` fixture (or `stepdoc.is_dry_run(config)`) tells your fixtures
 to use a simulated backend. Python evaluates arguments eagerly and dry-run only
 documents the branches the simulation takes.
 
