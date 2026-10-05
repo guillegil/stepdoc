@@ -53,7 +53,7 @@ SYM-7 came almost for free, so it could move from v0.2 to v0.1.
 
 ## Output
 
-`python examples/spike_demo.py` (the fake API stores age 0 as missing, as in brief §10.1):
+`uv run python examples/spike_demo.py` (the fake API stores age 0 as missing, as in brief §10.1):
 
 ```
 --- Procedure: user_lifecycle
@@ -82,7 +82,7 @@ SYM-7 came almost for free, so it could move from v0.2 to v0.1.
 
 ## Benchmark
 
-`python bench/bench_events.py`, 4-core Xeon @ 2.10 GHz, executing 2.2.1, best
+`uv run python bench/bench_events.py`, 4-core Xeon @ 2.10 GHz, executing 2.2.1, best
 of 5 runs. Each event is a register write from a user function through the
 fake device (2 library frames plus the bridge lambda). µs per event:
 

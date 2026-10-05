@@ -7,9 +7,12 @@ blocks and the actions your system under test emits.
 
 Status: early spike. See [SPIKE.md](SPIKE.md) for what was prototyped and measured.
 
+Development uses [uv](https://docs.astral.sh/uv/):
+
 ```bash
-pip install -e ".[dev]"
-pytest
-python examples/spike_demo.py      # prints a procedure and a report for both examples
-python bench/bench_events.py       # cost per recorded event
+uv sync                                  # create .venv with stepdoc and the dev group
+uv run pytest
+uv run python examples/spike_demo.py     # prints a procedure and a report for both examples
+uv run python bench/bench_events.py      # cost per recorded event
+uv run --python 3.10 pytest              # any other supported Python version
 ```

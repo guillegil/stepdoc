@@ -13,6 +13,8 @@ dependencies = ["executing>=2.0"]
 
 [project.optional-dependencies]
 pytest = ["pytest>=8"]
+
+[dependency-groups]
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.hatch.build.targets.wheel]
@@ -20,4 +22,4 @@ packages = ["src/stepdoc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "."]
+pythonpath = ["."]
