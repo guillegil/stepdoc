@@ -159,5 +159,5 @@ uv sync
 uv run pytest
 uv run mypy
 uv run python bench/bench_events.py      # cost per recorded event
-uv run --python 3.10 pytest              # any supported Python (3.10+)
+uv run --python 3.11 pytest              # any supported Python (3.11+)
 ```

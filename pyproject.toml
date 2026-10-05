@@ -8,7 +8,7 @@ version = "0.0.1.dev0"
 description = "Turn test code into test documentation: procedures with symbolic values and executed reports."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = ["executing>=2.0"]
 
 [project.optional-dependencies]
@@ -31,4 +31,5 @@ enable_assertion_pass_hook = true
 
 [tool.mypy]
 strict = true
+python_version = "3.11"
 files = ["src"]

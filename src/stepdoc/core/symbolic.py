@@ -302,7 +302,7 @@ def _analyse(site: Site) -> Resolution:
 def _statement_fallback(stmts: Any) -> Optional[ast.AST]:
     """Used when executing cannot place the instruction:
 
-    * Python < 3.11 cannot place STORE_ATTR/STORE_SUBSCR: if the statement is one
+    * Some STORE_ATTR/STORE_SUBSCR instructions are not placed: if the statement is one
       simple attribute/subscript assignment, use its target.
     * A suspended ``await`` (SEND/YIELD_VALUE) is not placed on any version: if the
       statement holds exactly one ``await <call>``, use that call.
