@@ -51,6 +51,10 @@ become `<expr>` (`<width * 4>`), and dict and list literals and f-strings are
 rendered part by part (`{"name": <name>, "age": 3}`, `/users/<user_id>`).
 SYM-7 came almost for free, so it could move from v0.2 to v0.1.
 
+Numbering: actions and nested steps share one sequence inside a step, in
+execution order, so an action can be 1.2 and the next nested step 1.3 with its
+own actions 1.3.1, 1.3.2 (STEP-1). A `@step` helper called inside a step nests.
+
 ## Output
 
 `uv run python examples/spike_demo.py` (the fake API stores age 0 as missing, as in brief §10.1):
@@ -58,26 +62,37 @@ SYM-7 came almost for free, so it could move from v0.2 to v0.1.
 ```
 --- Procedure: user_lifecycle
 1. Create user
-   - POST /users  {"name": <name>, "age": <age>}
+   1.1. POST /users  {"name": <name>, "age": <age>}
 2. Read user back
-   - GET /users/<user_id>
+   2.1. GET /users/<user_id>
 
 --- Executed report: user_lifecycle ('Ana', 0)
 1. Create user   [passed]
-   - POST /users  {'name': 'Ana', 'age': 0}  -> 201
+   1.1. POST /users  {'name': 'Ana', 'age': 0}  -> 201
 2. Read user back   [failed]
-   - GET /users/1  -> 200
+   2.1. GET /users/1  -> 200
 
 --- Procedure: output_by_mode
 1. Select mode and level
-   - dev.map.ctrl.mode = <mode>
-   - dev.map.dac.level = <level>
-2. Wait for PLL lock
-   - Read dev.map.status.pll_locked
-   - Read dev.map.status.pll_locked
-   - Read dev.map.status.pll_locked
-3. Check output
-   - Read dev.map.adc.value -> <vout>
+   1.1. dev.map.ctrl.mode = <mode>
+   1.2. dev.map.dac.level = <level>
+   1.3. Wait for PLL lock
+      1.3.1. Read dev.map.status.pll_locked
+      1.3.2. Read dev.map.status.pll_locked
+      1.3.3. Read dev.map.status.pll_locked
+2. Check output
+   2.1. Read dev.map.adc.value -> <vout>
+
+--- Executed report: output_by_mode (2, 2048)
+1. Select mode and level   [passed]
+   1.1. dev.map.ctrl.mode = 2
+   1.2. dev.map.dac.level = 2048
+   1.3. Wait for PLL lock   [passed]
+      1.3.1. Read dev.map.status.pll_locked -> False
+      1.3.2. Read dev.map.status.pll_locked -> False
+      1.3.3. Read dev.map.status.pll_locked -> True
+2. Check output   [passed]
+   2.1. Read dev.map.adc.value -> 1024
 ```
 
 ## Benchmark

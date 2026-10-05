@@ -36,15 +36,15 @@ def test_user_lifecycle(api, rec):
     proc = render_procedure(rec)
     assert proc.splitlines() == [
         "1. Create user",
-        '   - POST /users  {"name": <name>, "age": <age>}',
+        '   1.1. POST /users  {"name": <name>, "age": <age>}',
         "2. Read user back",
-        "   - GET /users/<user_id>",
+        "   2.1. GET /users/<user_id>",
         "3. Delete user",
-        "   - DELETE /users/<user_id>",
+        "   3.1. DELETE /users/<user_id>",
     ]
     report = render_report(rec)
-    assert "   - POST /users  {'name': 'Ana', 'age': 0}  -> 201" in report
-    assert "   - GET /users/1  -> 200" in report
+    assert "   1.1. POST /users  {'name': 'Ana', 'age': 0}  -> 201" in report
+    assert "   2.1. GET /users/1  -> 200" in report
 
 
 def test_literals_and_expressions(api, rec):

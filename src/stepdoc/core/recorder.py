@@ -37,10 +37,14 @@ class Recorder:
 
     # Steps ---------------------------------------------------------------- #
     def _open(self, title: str) -> Step:
-        siblings = self._stack[-1].children if self._stack else self.steps
-        parent = self._stack[-1].number + "." if self._stack else ""
-        s = Step(number=f"{parent}{len(siblings) + 1}", title=title, started=_perf())
-        siblings.append(s)
+        if self._stack:
+            parent = self._stack[-1]
+            s = Step(number=f"{parent.number}.{len(parent.entries) + 1}", title=title, started=_perf())
+            parent.children.append(s)
+            parent.entries.append(s)
+        else:
+            s = Step(number=str(len(self.steps) + 1), title=title, started=_perf())
+            self.steps.append(s)
         self._stack.append(s)
         return s
 
@@ -57,7 +61,13 @@ class Recorder:
 
     # Actions -------------------------------------------------------------- #
     def add_action(self, action: Action) -> None:
-        (self._stack[-1].actions if self._stack else self.unscoped).append(action)
+        if not self._stack:
+            self.unscoped.append(action)
+            return
+        s = self._stack[-1]
+        action.number = f"{s.number}.{len(s.entries) + 1}"
+        s.actions.append(action)
+        s.entries.append(action)
 
     def resolve(self) -> None:
         """Resolve every captured site into symbolic text."""

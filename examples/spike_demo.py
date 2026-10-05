@@ -44,7 +44,7 @@ def output_by_mode(dev, mode, level):
     with step("Select mode and level"):
         dev.map.ctrl.mode = mode
         dev.map.dac.level = level
-    wait_pll_lock(dev)
+        wait_pll_lock(dev)  # a @step helper: nests as 1.3
     with step("Check output"):
         vout = dev.map.adc.value
         assert vout == level // 2

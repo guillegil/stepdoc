@@ -38,20 +38,47 @@ def test_output_by_mode(dev, rec):
 
     assert render_procedure(rec).splitlines() == [
         "1. Select mode and level",
-        "   - dev.map.ctrl.mode = <mode>",
-        "   - dev.map.dac.level = <level>",
-        "   - dev.map.pulse.width = 100",
-        "   - dev.map.pulse.period = <width * 4>",
+        "   1.1. dev.map.ctrl.mode = <mode>",
+        "   1.2. dev.map.dac.level = <level>",
+        "   1.3. dev.map.pulse.width = 100",
+        "   1.4. dev.map.pulse.period = <width * 4>",
         "2. Wait for PLL lock",
-        "   - Read dev.map.status.pll_locked",
-        "   - Read dev.map.status.pll_locked",
-        "   - Read dev.map.status.pll_locked",
+        "   2.1. Read dev.map.status.pll_locked",
+        "   2.2. Read dev.map.status.pll_locked",
+        "   2.3. Read dev.map.status.pll_locked",
         "3. Measure output",
-        "   - Read dev.map.adc.value -> <vout>",
+        "   3.1. Read dev.map.adc.value -> <vout>",
     ]
     report = render_report(rec)
-    assert "   - dev.map.dac.level = 2048" in report
-    assert "   - Read dev.map.adc.value -> 1024" in report
+    assert "   1.2. dev.map.dac.level = 2048" in report
+    assert "   3.1. Read dev.map.adc.value -> 1024" in report
+
+
+def test_nested_steps_share_numbering_with_actions(dev, rec):
+    mode, level = 1, 10
+    with step("Configure"):
+        dev.map.ctrl.mode = mode
+        with step("Set level"):
+            dev.map.dac.level = level
+            dev.map.ctrl.enable = 1
+        wait_pll_lock(dev)
+        dev.map.ctrl.enable = 0
+    with step("Done"):
+        pass
+
+    assert render_procedure(rec).splitlines() == [
+        "1. Configure",
+        "   1.1. dev.map.ctrl.mode = <mode>",
+        "   1.2. Set level",
+        "      1.2.1. dev.map.dac.level = <level>",
+        "      1.2.2. dev.map.ctrl.enable = 1",
+        "   1.3. Wait for PLL lock",
+        "      1.3.1. Read dev.map.status.pll_locked",
+        "      1.3.2. Read dev.map.status.pll_locked",
+        "      1.3.3. Read dev.map.status.pll_locked",
+        "   1.4. dev.map.ctrl.enable = 0",
+        "2. Done",
+    ]
 
 
 def test_helpers(dev, rec):

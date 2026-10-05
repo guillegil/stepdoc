@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from .symbolic import Site, Resolution
 
@@ -24,6 +24,8 @@ class Action:
     value: Any
     t: float
     meta: dict[str, Any] = field(default_factory=dict)
+    number: Optional[str] = None
+    """Position in the step tree (``"2.1"``); ``None`` for unscoped actions."""
 
     # Filled by ``resolve()``; ``None`` until then.
     expr: Optional[str] = None
@@ -82,5 +84,7 @@ class Step:
     ended: float = 0.0
     actions: list[Action] = field(default_factory=list)
     children: list["Step"] = field(default_factory=list)
+    entries: list[Union[Action, "Step"]] = field(default_factory=list, repr=False)
+    """Actions and child steps in execution order; they share one numbering (1.1, 1.2, 1.2.1)."""
     error: Optional[str] = None
     section: Literal["setup", "procedure", "teardown"] = "procedure"

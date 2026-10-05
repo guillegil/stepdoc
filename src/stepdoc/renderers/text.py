@@ -38,16 +38,17 @@ def _line(a: Action, symbolic: bool) -> str:
 
 
 def _steps(steps: list[Step], symbolic: bool, depth: int, out: list[str]) -> None:
-    pad = "   " * depth
     for s in steps:
         status = "" if symbolic else f"   [{s.status}]"
-        out.append(f"{pad}{s.number}. {s.title}{status}")
-        for a in s.actions:
+        out.append(f"{'   ' * depth}{s.number}. {s.title}{status}")
+        for e in s.entries:
+            if isinstance(e, Step):
+                _steps([e], symbolic, depth + 1, out)
+                continue
             extra = ""
-            if not symbolic and "status" in a.meta:
-                extra = f"  -> {a.meta['status']}"
-            out.append(f"{pad}   - {_line(a, symbolic)}{extra}")
-        _steps(s.children, symbolic, depth + 1, out)
+            if not symbolic and "status" in e.meta:
+                extra = f"  -> {e.meta['status']}"
+            out.append(f"{'   ' * (depth + 1)}{e.number}. {_line(e, symbolic)}{extra}")
 
 
 def render(rec: Recorder, *, symbolic: bool, title: str = "") -> str:
