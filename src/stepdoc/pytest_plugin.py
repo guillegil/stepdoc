@@ -17,7 +17,7 @@ from .core.model import Check, Location, Section
 from .core.record import case_record, dumps, run_record
 from .core.recorder import Recorder, current_recorder, is_dry_run
 from .core.symbolic import set_skip_modules
-from .renderers import markdown
+from .renderers import format_for_path, render
 
 _state_key = pytest.StashKey["_State"]()
 _recorder_key = pytest.StashKey[Recorder]()
@@ -42,9 +42,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--stepdoc-record", metavar="PATH", default=None,
                     help="write the JSON run record (the source of every document)")
     group.addoption("--stepdoc-procedure", metavar="PATH", default=None,
-                    help="write the procedure (Markdown) with symbolic values")
+                    help="write the procedure with symbolic values (.md, .html or .txt)")
     group.addoption("--stepdoc-report", metavar="PATH", default=None,
-                    help="write the executed report (Markdown) with concrete values")
+                    help="write the executed report with concrete values (.md, .html or .txt)")
     group.addoption("--stepdoc-dry-run", action="store_true", default=False,
                     help="collect the procedure without judging results; "
                          "tests can switch to simulated backends via the stepdoc_dry_run fixture")
@@ -163,9 +163,11 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     if state.record_path:
         written.append(_write(state.record_path, dumps(record)))
     if state.procedure_path:
-        written.append(_write(state.procedure_path, markdown.render_procedure(record)))
+        fmt = format_for_path(state.procedure_path)
+        written.append(_write(state.procedure_path, render(record, "procedure", fmt)))
     if state.report_path:
-        written.append(_write(state.report_path, markdown.render_report(record)))
+        fmt = format_for_path(state.report_path)
+        written.append(_write(state.report_path, render(record, "report", fmt)))
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         for path in written:

@@ -10,7 +10,7 @@ writes two documents:
 
 Both come from a JSON **run record**, so they can never drift apart from the code.
 
-Status: v0.1 in progress (brief §14). [SPIKE.md](SPIKE.md) has the design
+Status: v0.2 in progress (brief §14). [SPIKE.md](SPIKE.md) has the design
 measurements behind it.
 
 ## Quick look
@@ -143,8 +143,8 @@ enable_assertion_pass_hook = true
 | Option | Purpose |
 |---|---|
 | `--stepdoc-record=PATH` | Write the JSON run record (schema: `src/stepdoc/schema/run-record.schema.json`) |
-| `--stepdoc-procedure=PATH` | Write the procedure (Markdown) |
-| `--stepdoc-report=PATH` | Write the executed report (Markdown) |
+| `--stepdoc-procedure=PATH` | Write the procedure. The extension picks the format: `.md`, `.html` (one self-contained file) or `.txt` |
+| `--stepdoc-report=PATH` | Write the executed report, same formats |
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
 | `stepdoc_collapse_repeats` (ini) | Collapse polling into one line (default `true`) |
@@ -154,6 +154,17 @@ Without any of these options the plugin records nothing and prints nothing.
 The session-scoped `stepdoc_dry_run` fixture (or `stepdoc.is_dry_run(config)`) tells your fixtures
 to use a simulated backend. Python evaluates arguments eagerly and dry-run only
 documents the branches the simulation takes.
+
+## Rendering a saved record
+
+`stepdoc render` turns a run record into documents again, without running the
+tests or needing pytest installed:
+
+```bash
+stepdoc render out/run.json --procedure procedure.html --report report.md
+stepdoc render out/run.json                          # procedure as Markdown on stdout
+stepdoc render out/run.json --doc report --format text
+```
 
 ## Without pytest
 

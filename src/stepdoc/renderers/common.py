@@ -3,6 +3,7 @@ never the in-memory recorder, so ``stepdoc render`` can reuse it later."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Iterator, Optional
 
@@ -257,6 +258,18 @@ def procedures(record: Record) -> list[Procedure]:
 def _fullest(cases: list[Record], section: str) -> Optional[Record]:
     best = max(cases, key=lambda c: len(procedure_lines(c, (section,))))
     return best if has_section(best, section) else None
+
+
+def anchors(ids: list[str]) -> list[str]:
+    """Stable, unique HTML ids for test or procedure ids (links from contents)."""
+    seen: dict[str, int] = {}
+    out = []
+    for i in ids:
+        base = re.sub(r"[^A-Za-z0-9_-]+", "-", i).strip("-").lower() or "test"
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        out.append(base if n == 0 else f"{base}-{n + 1}")
+    return out
 
 
 def short_name(procedure_id: str) -> str:
