@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --locked --python ${{ matrix.python }}
+      - name: Test
+        run: uv run --python ${{ matrix.python }} pytest -q
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - name: Type check
+        run: uv run mypy
+      - name: Build
+        run: uv build
+      - name: Wheel ships the plugin entry point, schema and py.typed
+        run: |
+          unzip -l dist/*.whl | grep -E "py.typed|run-record.schema.json"
+          unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.pytest_plugin"

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stepdoc"
+version = "0.0.1.dev0"
+description = "Turn test code into test documentation: procedures with symbolic values and executed reports."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["executing>=2.0"]
+
+[project.optional-dependencies]
+pytest = ["pytest>=8"]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27", "jsonschema>=4.18", "mypy>=1.10"]
+
+[project.entry-points.pytest11]
+stepdoc = "stepdoc.pytest_plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stepdoc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+stepdoc_skip_modules = ["httpx", "tests.fakes"]
+enable_assertion_pass_hook = true
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src"]
