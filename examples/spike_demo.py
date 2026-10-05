@@ -1,6 +1,7 @@
 """Print the procedure and the executed report for both spike examples.
 
-Run: ``python examples/spike_demo.py``
+Run: ``uv run python examples/spike_demo.py [--json DIR]``; with ``--json`` it
+also writes each run record (OUT-1) to ``DIR/<name>.json``.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import httpx  # noqa: E402
 
 import stepdoc  # noqa: E402
 from stepdoc import step  # noqa: E402
+from stepdoc.core.record import dumps  # noqa: E402
 from stepdoc.renderers.text import render_procedure, render_report  # noqa: E402
 from tests.conftest import http_bridge  # noqa: E402
 from tests.fakes.fake_api import fake_api_transport  # noqa: E402
@@ -50,14 +52,20 @@ def output_by_mode(dev, mode, level):
         assert vout == level // 2
 
 
+JSON_DIR = Path(sys.argv[sys.argv.index("--json") + 1]) if "--json" in sys.argv else None
+
+
 def run(title, fn, *args):
-    with stepdoc.Recorder() as rec:
+    with stepdoc.Recorder(title) as rec:
         try:
             fn(*args)
         except AssertionError:
             pass
     print(f"--- Procedure: {title}\n{render_procedure(rec)}\n")
     print(f"--- Executed report: {title} {args[1:]}\n{render_report(rec)}\n")
+    if JSON_DIR is not None:
+        JSON_DIR.mkdir(parents=True, exist_ok=True)
+        (JSON_DIR / f"{title}.json").write_text(dumps(rec))
 
 
 def main():

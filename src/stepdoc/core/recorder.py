@@ -20,8 +20,12 @@ _perf = time.perf_counter
 class Recorder:
     """Holds the step tree of one test (or one script run)."""
 
-    def __init__(self, *, symbolic: bool = True) -> None:
+    def __init__(self, name: str = "", *, symbolic: bool = True) -> None:
+        self.name = name
         self.symbolic = symbolic
+        self.started = _perf()
+        self.started_at = time.time()
+        self.ended: Optional[float] = None
         self.steps: list[Step] = []
         self.unscoped: list[Action] = []  # ACT-3
         self._stack: list[Step] = []
@@ -33,6 +37,7 @@ class Recorder:
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        self.ended = _perf()
         _current.reset(self._token)
 
     # Steps ---------------------------------------------------------------- #

@@ -15,6 +15,8 @@ the brief's examples on Python 3.10 to 3.14, and the hot path costs about
 src/stepdoc/core/symbolic.py   capture (hot path) + resolution (cached) + expression rendering
 src/stepdoc/core/recorder.py   Recorder, step() (context manager and decorator), record_action()
 src/stepdoc/core/model.py      Action, Step, Location (subset of brief §8)
+src/stepdoc/core/record.py     JSON run record writer (OUT-1)
+src/stepdoc/schema/            JSON Schema of the run record
 src/stepdoc/renderers/text.py  throwaway text renderer for procedure and report
 tests/fakes/                   fake user API (httpx.MockTransport) and fake device with register events
 tests/conftest.py              the two bridges, written as a user would
@@ -93,6 +95,54 @@ own actions 1.3.1, 1.3.2 (STEP-1). A `@step` helper called inside a step nests.
       1.3.3. Read dev.map.status.pll_locked -> True
 2. Check output   [passed]
    2.1. Read dev.map.adc.value -> 1024
+```
+
+## JSON run record (OUT-1)
+
+`stepdoc.core.record.to_dict(rec)` / `dumps(rec)` write the run as JSON, and
+[`src/stepdoc/schema/run-record.schema.json`](src/stepdoc/schema/run-record.schema.json)
+(JSON Schema 2020-12) describes it; the tests validate every record against it.
+`uv run python examples/spike_demo.py --json out/` writes one file per run.
+
+Design choices:
+
+- **One record, both documents.** Every action carries `concrete` and `symbolic`
+  fields for its target and value. The procedure renders one, the report the
+  other, so they cannot come from different runs.
+- **The tree keeps execution order.** A step's `entries` mixes actions and child
+  steps (tagged `"type": "action"` / `"step"`) in the order they ran, which is what
+  the X.Y.Z numbering is built from.
+- **Values never lose information.** JSON values pass through; anything else is
+  a tagged object: `{"$type": "mymod.Mode", "$enum": "ACTIVE", "value": 1}`,
+  `{"$type": "bytes", "$base64": "..."}`, or `{"$type": ..., "$repr": "..."}`.
+  Redaction (ACT-9) must run before this.
+- **Portable and diffable.** Times are seconds since the run started (monotonic),
+  plus one `started_at` wall-clock timestamp; source paths are relative to the
+  project root. Both matter for procedure diffs (CTL-2).
+- **Versioned.** `schema_version` starts at `0.1`; `$schema` is a URN until there is
+  a published URL. `test.params` and `test.seed` are reserved for the pytest
+  plugin (PAR-1, PAR-4); checks and the suite level (many tests per file) come
+  with v0.1.
+
+One action, abridged:
+
+```json
+{
+  "type": "action",
+  "number": "1.1",
+  "op": "request",
+  "target": {"concrete": "POST /users", "symbolic": "POST /users"},
+  "value": {
+    "concrete": {"name": "Ana", "age": 0},
+    "symbolic": "{\"name\": <name>, \"age\": <age>}",
+    "expr": "{'name': name, 'age': age}"
+  },
+  "bound_to": null,
+  "resolved": true,
+  "location": {"file": "examples/spike_demo.py", "line": 30},
+  "t": 0.000719,
+  "meta": {"method": "POST", "url": "/users", "status": 201}
+}
 ```
 
 ## Benchmark
@@ -184,11 +234,12 @@ event before polling collapse (ACT-4).
   bind to the wrong name. Keyword arguments always work.
 - Generic decorators with `*args, **kwargs` wrappers have the same problem.
 - Polling still produces one line per read (ACT-4), and checks, parameters,
-  redaction, the JSON record and the pytest plugin are not started.
+  redaction and the pytest plugin are not started. Renderers still read the
+  in-memory objects; in v0.1 they should read the JSON record instead (D6).
 
 ## Suggested next step
 
-Start v0.1 on this code: the JSON run record (OUT-1) and Markdown renderer (OUT-2)
-on top of `Action`/`Step`, then the thin pytest plugin (one recorder per test,
+Start v0.1 on this code: a Markdown renderer (OUT-2) that reads the JSON run
+record, then the thin pytest plugin (one recorder per test,
 resolve at teardown, `stepdoc_skip_modules` ini option), then checks and
 `assert` capture (CHK-1…4), redaction (ACT-9) and dry-run (DRY-1, 2).

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stepdoc:schema:run-record:0.1",
+  "title": "stepdoc run record",
+  "description": "One test run. The procedure renders the symbolic fields, the executed report the concrete ones. Times are seconds since the run started.",
+  "type": "object",
+  "required": ["schema_version", "generator", "test", "unscoped", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"const": "0.1"},
+    "generator": {
+      "type": "object",
+      "required": ["name", "version", "python"],
+      "properties": {
+        "name": {"const": "stepdoc"},
+        "version": {"type": "string"},
+        "python": {"type": "string"}
+      }
+    },
+    "test": {
+      "type": "object",
+      "required": ["id", "status", "started_at", "duration", "params", "seed"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "description": "pytest node id, or a name given to the Recorder"},
+        "status": {"$ref": "#/$defs/status"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "duration": {"type": ["number", "null"]},
+        "params": {"type": "object", "description": "Parameter values of this case (PAR-1); filled by the pytest plugin"},
+        "seed": {"type": ["integer", "string", "null"], "description": "Random seed when a source provides one (PAR-4)"}
+      }
+    },
+    "unscoped": {"type": "array", "items": {"$ref": "#/$defs/action"}, "description": "Actions outside any step (ACT-3)"},
+    "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}}
+  },
+  "$defs": {
+    "status": {"enum": ["passed", "failed", "error", "not_run", "unknown"]},
+    "location": {
+      "type": ["object", "null"],
+      "required": ["file", "line"],
+      "properties": {"file": {"type": "string"}, "line": {"type": "integer"}}
+    },
+    "step": {
+      "type": "object",
+      "required": ["type", "number", "title", "section", "status", "started", "ended", "error", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"const": "step"},
+        "number": {"type": "string", "description": "1, 1.2, 1.2.3 (S1/T1 later for setup/teardown)"},
+        "title": {"type": "string"},
+        "section": {"enum": ["setup", "procedure", "teardown"]},
+        "status": {"$ref": "#/$defs/status"},
+        "started": {"type": "number"},
+        "ended": {"type": "number"},
+        "error": {"type": ["string", "null"]},
+        "entries": {
+          "type": "array",
+          "description": "Actions and child steps in execution order, sharing one numbering",
+          "items": {"oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/step"}]}
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["type", "number", "op", "target", "value", "bound_to", "resolved", "location", "t", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"const": "action"},
+        "number": {"type": ["string", "null"], "description": "null for unscoped actions"},
+        "op": {"type": "string", "description": "Free-form: request, read, write, query, call, ..."},
+        "target": {
+          "type": "object",
+          "required": ["concrete", "symbolic"],
+          "properties": {
+            "concrete": {"type": "string", "description": "GET /users/17"},
+            "symbolic": {"type": ["string", "null"], "description": "GET /users/<user_id>"}
+          }
+        },
+        "value": {
+          "type": "object",
+          "required": ["concrete", "symbolic", "expr"],
+          "properties": {
+            "concrete": {"description": "JSON value; non-JSON values are tagged objects with $type plus $repr, $enum or $base64"},
+            "symbolic": {"type": ["string", "null"], "description": "<width>, 100, {\"name\": <name>}"},
+            "expr": {"type": ["string", "null"], "description": "Source expression, null for literals"}
+          }
+        },
+        "bound_to": {"type": ["string", "null"], "description": "Name a read was assigned to"},
+        "resolved": {"type": "boolean", "description": "false when the source could not be found (SYM-5)"},
+        "location": {"$ref": "#/$defs/location"},
+        "t": {"type": "number"},
+        "meta": {"type": "object", "description": "Bridge metadata, for example the HTTP status code"}
+      }
+    }
+  }
+}
