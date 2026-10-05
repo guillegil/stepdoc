@@ -50,14 +50,21 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
             for name, values in params.items():
                 out.append(f"| {_code(name)} | {', '.join(_code(v) for v in values)} |")
             out.append("")
+        if proc.setup is not None:
+            out += [_md_line(line) for line in test_lines(proc.setup, symbolic=True, sections=("setup",))]
+            out.append("")
         for _, members in proc.variants:
             if len(proc.variants) > 1:
                 cases = ", ".join(_code(m["case"] or m["id"]) for m in members)
                 out += [f"**Procedure for {cases}**", ""]
             else:
                 out += ["**Procedure**", ""]
-            longest = max(members, key=lambda m: len(test_lines(m, symbolic=True)))
-            out += [_md_line(line) for line in test_lines(longest, symbolic=True)]
+            only = ("procedure",)
+            longest = max(members, key=lambda m: len(test_lines(m, symbolic=True, sections=only)))
+            out += [_md_line(line) for line in test_lines(longest, symbolic=True, sections=only)]
+            out.append("")
+        if proc.teardown is not None:
+            out += [_md_line(line) for line in test_lines(proc.teardown, symbolic=True, sections=("teardown",))]
             out.append("")
     return "\n".join(out).rstrip() + "\n"
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:stepdoc:schema:run-record:0.1",
+  "$id": "urn:stepdoc:schema:run-record:0.2",
   "title": "stepdoc run record",
   "description": "One run of one or more test cases. The procedure renders the symbolic fields, the executed report the concrete ones. Times are seconds since the test case started.",
   "type": "object",
@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "$schema": {"type": "string"},
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"], "description": "0.2 adds count, t_last, section and reads"},
     "generator": {
       "type": "object",
       "required": ["name", "version", "python"],
@@ -24,6 +24,7 @@
   },
   "$defs": {
     "status": {"enum": ["passed", "failed", "error", "not_run", "unknown"]},
+    "section": {"enum": ["setup", "procedure", "teardown"], "description": "Unscoped entries only: the phase they ran in (STEP-8)"},
     "location": {
       "type": ["object", "null"],
       "required": ["file", "line"],
@@ -45,7 +46,7 @@
         "seed": {"description": "Random seed when a source provides one (PAR-4)"},
         "started_at": {"type": "string", "format": "date-time"},
         "duration": {"type": ["number", "null"]},
-        "unscoped": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/check"}]}, "description": "Actions and checks outside any step (ACT-3)"},
+        "unscoped": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/check"}]}, "description": "Actions and checks outside any step (ACT-3); each carries the section it ran in"},
         "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}}
       }
     },
@@ -55,7 +56,7 @@
       "additionalProperties": false,
       "properties": {
         "type": {"const": "step"},
-        "number": {"type": "string", "description": "1, 1.2, 1.2.3"},
+        "number": {"type": "string", "description": "1, 1.2, 1.2.3; setup steps S1, S1.1; teardown steps T1"},
         "title": {"type": "string"},
         "section": {"enum": ["setup", "procedure", "teardown"]},
         "status": {"$ref": "#/$defs/status"},
@@ -100,7 +101,10 @@
         "resolved": {"type": "boolean", "description": "false when the source could not be found (SYM-5)"},
         "location": {"$ref": "#/$defs/location"},
         "t": {"type": "number"},
-        "meta": {"type": "object", "description": "Bridge metadata, for example the HTTP status code"}
+        "count": {"type": "integer", "minimum": 1, "description": "Identical consecutive events from one code location collapsed into this entry (ACT-4 polling)"},
+        "t_last": {"type": ["number", "null"], "description": "Time of the last repeated event when count > 1"},
+        "meta": {"type": "object", "description": "Bridge metadata, for example the HTTP status code"},
+        "section": {"$ref": "#/$defs/section"}
       }
     },
     "check": {
@@ -117,7 +121,9 @@
         "detail": {"type": ["string", "null"]},
         "selected": {"type": ["string", "null"], "description": "Chosen branch of a composite check"},
         "children": {"type": "array", "items": {"$ref": "#/$defs/check"}},
-        "location": {"$ref": "#/$defs/location"}
+        "reads": {"type": "array", "items": {"$ref": "#/$defs/action"}, "description": "Reads on the check's source line that fed it (ACT-5)"},
+        "location": {"$ref": "#/$defs/location"},
+        "section": {"$ref": "#/$defs/section"}
       }
     }
   }

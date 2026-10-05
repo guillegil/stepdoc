@@ -43,15 +43,14 @@ def test_output_by_mode(dev, rec):
         "   1.3. dev.map.pulse.width = 100",
         "   1.4. dev.map.pulse.period = <width * 4>",
         "2. Wait for PLL lock",
-        "   2.1. Read dev.map.status.pll_locked",
-        "   2.2. Read dev.map.status.pll_locked",
-        "   2.3. Read dev.map.status.pll_locked",
+        "   2.1. Poll dev.map.status.pll_locked",
         "3. Measure output",
         "   3.1. Read dev.map.adc.value -> <vout>",
     ]
     text = report(rec)
     assert "   1.2. dev.map.dac.level = 2048" in text
     assert "   3.1. Read dev.map.adc.value -> 1024" in text
+    assert "   2.1. Poll dev.map.status.pll_locked -> True (3 reads, " in text
 
 
 def test_nested_steps_share_numbering_with_actions(dev, rec):
@@ -73,9 +72,7 @@ def test_nested_steps_share_numbering_with_actions(dev, rec):
         "      1.2.1. dev.map.dac.level = <level>",
         "      1.2.2. dev.map.ctrl.enable = 1",
         "   1.3. Wait for PLL lock",
-        "      1.3.1. Read dev.map.status.pll_locked",
-        "      1.3.2. Read dev.map.status.pll_locked",
-        "      1.3.3. Read dev.map.status.pll_locked",
+        "      1.3.1. Poll dev.map.status.pll_locked",
         "   1.4. dev.map.ctrl.enable = 0",
         "2. Done",
     ]

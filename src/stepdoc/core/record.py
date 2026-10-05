@@ -20,8 +20,10 @@ from typing import Any, Iterable, Optional, Union
 from .model import Action, Check, Location, Step
 from .recorder import Recorder
 
-SCHEMA_ID = "urn:stepdoc:schema:run-record:0.1"  # no published URL yet
-SCHEMA_VERSION = "0.1"
+SCHEMA_ID = "urn:stepdoc:schema:run-record:0.2"  # no published URL yet
+SCHEMA_VERSION = "0.2"
+READABLE_VERSIONS = ("0.1", "0.2")
+"""0.2 only adds fields; renderers read 0.1 records too."""
 
 
 def version() -> str:
@@ -91,7 +93,10 @@ def _action(a: Action, ctx: _Ctx) -> dict[str, Any]:
         "resolved": a.symbolic,
         "location": ctx.loc(a.location),
         "t": ctx.t(a.t),
+        "count": a.count,
+        "t_last": ctx.t(a.t_last),
         "meta": to_jsonable(a.meta),
+        **_section(a.section),
     }
 
 
@@ -106,8 +111,14 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         "detail": c.detail,
         "selected": c.selected,
         "children": [_check(ch, ctx) for ch in c.children],
+        "reads": [_action(a, ctx) for a in c.reads],
         "location": ctx.loc(c.location),
+        **_section(c.section),
     }
+
+
+def _section(section: Optional[str]) -> dict[str, Any]:
+    return {} if section is None else {"section": section}
 
 
 def _step(s: Step, ctx: _Ctx) -> dict[str, Any]:
@@ -192,6 +203,6 @@ def dumps(record: Union[Recorder, dict[str, Any]], root: Optional[str] = None, *
 def load(path: Union[str, "os.PathLike[str]"]) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         data: dict[str, Any] = json.load(f)
-    if data.get("schema_version") != SCHEMA_VERSION:
+    if data.get("schema_version") not in READABLE_VERSIONS:
         raise ValueError(f"unsupported run record schema {data.get('schema_version')!r}")
     return data

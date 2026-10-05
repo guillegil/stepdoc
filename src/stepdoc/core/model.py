@@ -44,6 +44,14 @@ class Action:
     meta: dict[str, Any] = field(default_factory=dict)
     number: Optional[str] = None
     """Position in the step tree (``"2.1"``); ``None`` for unscoped actions."""
+    count: int = 1
+    """How many identical consecutive events this entry stands for (ACT-4 polling)."""
+    t_last: Optional[float] = None
+    """Time of the last repeated event when ``count > 1``."""
+    section: Optional[Section] = None
+    """Set on unscoped actions only: the phase (setup, procedure, teardown) they ran in."""
+    name: Optional[str] = None
+    """Symbolic name given with ``stepdoc.value()`` (SYM-4); wins over the source."""
 
     # Filled by ``resolve()``.
     expr: Optional[str] = None
@@ -67,6 +75,9 @@ class Action:
     def resolve(self) -> None:
         """Turn the captured call site into symbolic text. Idempotent."""
         site, self.site = self.site, None
+        if self.name is not None and self.direction != "out":
+            self.symbolic_value = f"<{self.name}>"
+            self.expr = self.name
         if site is None:
             if self.symbolic_target is None:
                 self.symbolic_target = self.target
@@ -78,7 +89,7 @@ class Action:
             return
         self.symbolic = True
         self.bound_to = res.bound_to
-        if self.direction != "out":
+        if self.direction != "out" and self.name is None:
             sym = res.select_value(self.value_from)
             if sym is not None:
                 self.expr = None if sym.literal else sym.source
@@ -110,6 +121,11 @@ class Check:
     source: Any = field(default=None, repr=False, compare=False)
     """Original object from the producer; opaque to the core and never serialised."""
     number: Optional[str] = None
+    reads: list[Action] = field(default_factory=list)
+    """Reads on the same source line that fed this check (ACT-5), e.g. the register
+    read by ``assert dev.status.ok == 1``. They are shown on the check's line."""
+    section: Optional[Section] = None
+    """Set on unscoped checks only, like ``Action.section``."""
 
 
 Entry = Union[Action, Check, "Step"]

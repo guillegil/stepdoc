@@ -13,7 +13,7 @@ from typing import Any, Generator, Optional
 
 import pytest
 
-from .core.model import Check, Location
+from .core.model import Check, Location, Section
 from .core.record import case_record, dumps, run_record
 from .core.recorder import Recorder, current_recorder, is_dry_run
 from .core.symbolic import set_skip_modules
@@ -33,6 +33,7 @@ class _State:
         self.dry_run: bool = opt.stepdoc_dry_run
         self.active = bool(self.record_path or self.procedure_path or self.report_path or self.dry_run)
         self.root = str(config.rootpath)
+        self.collapse_repeats: bool = config.getini("stepdoc_collapse_repeats")
         self.cases: list[dict[str, Any]] = []
 
 
@@ -50,6 +51,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addini("stepdoc_skip_modules", type="linelist", default=[],
                   help="module prefixes skipped when looking for the user's source line "
                        "(drivers, clients, bridges' libraries)")
+    parser.addini("stepdoc_collapse_repeats", type="bool", default=True,
+                  help="collapse repeated reads or calls from one source line (polling) into one line")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -62,9 +65,10 @@ def pytest_configure(config: pytest.Config) -> None:
         set_skip_modules(skip)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def stepdoc_dry_run(request: pytest.FixtureRequest) -> bool:
-    """True when running with ``--stepdoc-dry-run`` (DRY-2)."""
+    """True when running with ``--stepdoc-dry-run`` (DRY-2). Session-scoped, so
+    session fixtures (a device, a mock server) can use it too."""
     return is_dry_run(request.config)
 
 
@@ -80,7 +84,7 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
     state: _State = item.config.stash[_state_key]
     if not state.active:
         return (yield)
-    rec = Recorder(item.nodeid, dry_run=state.dry_run)
+    rec = Recorder(item.nodeid, dry_run=state.dry_run, collapse_repeats=state.collapse_repeats)
     item.stash[_recorder_key] = rec
     try:
         with rec:
@@ -99,6 +103,28 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
                 outcome=item.stash.get(_outcome_key, None),
             )
         )
+
+
+def _in_section(item: pytest.Item, section: Section) -> None:
+    rec = item.stash.get(_recorder_key, None)
+    if rec is not None:
+        rec.section = section
+
+
+# STEP-8: steps run by fixtures go into the Setup and Teardown sections.
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
+    _in_section(item, "setup")
+    try:
+        return (yield)
+    finally:
+        _in_section(item, "procedure")
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item: pytest.Item, nextitem: Optional[pytest.Item]) -> Generator[None, None, None]:
+    _in_section(item, "teardown")
+    return (yield)
 
 
 @pytest.hookimpl(wrapper=True)
