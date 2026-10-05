@@ -28,10 +28,16 @@ jobs:
       - run: uv sync --locked
       - name: Type check
         run: uv run mypy
+      - name: Agent skill passes the Agent Skills validator
+        run: |
+          uv run stepdoc skill install --path "$RUNNER_TEMP/skill"
+          uvx --from skills-ref agentskills validate "$RUNNER_TEMP/skill/stepdoc"
       - name: Build
         run: uv build
-      - name: Wheel ships the plugin and CLI entry points, schema and py.typed
+      - name: Wheel ships the entry points, schema, skill and py.typed
         run: |
           unzip -l dist/*.whl | grep -E "py.typed|run-record.schema.json"
+          unzip -l dist/*.whl | grep -F "stepdoc/skill/SKILL.md"
+          unzip -l dist/*.whl | grep -F "stepdoc/skill/references/bridges.md"
           unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.pytest_plugin"
           unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.cli:main"
