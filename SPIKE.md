@@ -1,5 +1,11 @@
 # Spike: symbolic value resolution
 
+> **Historical record.** This page describes the spike as it was measured. v0.1 has
+> since built on it (see the README): `examples/spike_demo.py` became the pytest
+> example in `examples/quickstart/`, the text renderer now reads the JSON run
+> record, and the record wraps test cases in a run (`"tests": [...]`) and adds checks
+> and a `direction` per action.
+
 Roadmap milestone "Spike" (brief §14): prototype symbolic resolution with
 `executing` against two fakes, an HTTP API through httpx event hooks and a
 device with read/write events, including helper functions, and benchmark the

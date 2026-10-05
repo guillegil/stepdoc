@@ -21,6 +21,8 @@ from typing import Any, Callable, Optional, Sequence, TypeVar, Union
 
 import executing
 
+from .redaction import MASK, is_secret_key
+
 __all__ = [
     "Site",
     "Resolution",
@@ -30,6 +32,7 @@ __all__ = [
     "set_skip_modules",
     "skip_modules",
     "clear_caches",
+    "assert_source",
 ]
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -254,7 +257,8 @@ class Resolution:
                         return outer._expand(_fresh(rep))  # type: ignore[union-attr]
                 return n
 
-        return Substitute().visit(_fresh(node))
+        result: ast.expr = Substitute().visit(_fresh(node))
+        return result
 
 
 def _fresh(node: ast.expr) -> ast.expr:
@@ -317,7 +321,7 @@ def _statement_fallback(stmts: Any) -> Optional[ast.AST]:
         return None
     if isinstance(target, (ast.Attribute, ast.Subscript)):
         if not hasattr(target, "parent"):
-            target.parent = stmt  # type: ignore[attr-defined]
+            setattr(target, "parent", stmt)
         return target
     return None
 
@@ -342,8 +346,8 @@ def _classify(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
                 and isinstance(grand.value, (ast.Tuple, ast.List))
                 and len(grand.value.elts) == len(parent.elts)
             ):
-                value = grand.value.elts[parent.elts.index(node)]
-                return Resolution(True, "assign", value_node=value, target_source=target)
+                elt = grand.value.elts[parent.elts.index(node)]
+                return Resolution(True, "assign", value_node=elt, target_source=target)
         return Resolution(True, "assign", target_source=target, note="unsupported assignment form")
 
     if isinstance(node, ast.Call):
@@ -356,7 +360,8 @@ def _classify(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
         params: tuple[str, ...] = ()
         if callee is not None:
             names = callee.co_varnames[: callee.co_argcount]
-            if names and names[0] in ("self", "cls") and isinstance(node.func, ast.Attribute):
+            is_method = isinstance(node.func, ast.Attribute) or callee.co_name == "__init__"
+            if names and names[0] in ("self", "cls") and is_method:
                 names = names[1:]
             params = tuple(names)
         return Resolution(
@@ -422,7 +427,10 @@ def _render(node: ast.expr) -> tuple[str, str, bool]:
         literal = True
         for k, v in zip(node.keys, node.values):
             kt, _, kl = _render(k)  # type: ignore[arg-type]
-            vt, _, vl = _render(v)
+            if isinstance(k, ast.Constant) and isinstance(k.value, str) and is_secret_key(k.value):
+                vt, vl = json.dumps(MASK), True  # ACT-9: literal secrets in source
+            else:
+                vt, _, vl = _render(v)
             literal = literal and kl and vl
             parts.append(f"{kt}: {vt}")
         text = "{" + ", ".join(parts) + "}"
@@ -448,3 +456,23 @@ def _render(node: ast.expr) -> tuple[str, str, bool]:
         return f'"{raw}"', raw, False
     text = f"<{_unparse(node)}>"
     return text, text, False
+
+
+def assert_source(tb: Any) -> Optional[str]:
+    """Source of the ``assert`` that raised, from the innermost traceback entry
+    (``"level < 15"``), or ``None`` when it was not a plain assert statement."""
+    if tb is None:
+        return None
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    try:
+        source = executing.Source.for_frame(tb.tb_frame)
+        stmts = source.statements_at_line(tb.tb_lineno)
+    except Exception:
+        return None
+    if len(stmts) == 1:
+        (stmt,) = stmts
+        if isinstance(stmt, ast.Assert):
+            # As written, like pytest_assertion_pass reports passing asserts.
+            return ast.get_source_segment(source.text, stmt.test) or _unparse(stmt.test)
+    return None

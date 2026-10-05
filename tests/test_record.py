@@ -9,9 +9,8 @@ import jsonschema
 from stepdoc import Recorder, step
 from stepdoc.core.record import dumps, to_dict, to_jsonable
 
-SCHEMA = json.loads(
-    (Path(__file__).resolve().parents[1] / "src/stepdoc/schema/run-record.schema.json").read_text()
-)
+ROOT = Path(__file__).resolve().parents[1]
+SCHEMA = json.loads((ROOT / "src/stepdoc/schema/run-record.schema.json").read_text())
 
 
 class Mode(enum.Enum):
@@ -29,6 +28,7 @@ def make_record(dev, api):
         with step("Create user"):
             name = "Ana"
             api.post("/users", json={"name": name, "age": 3})
+        step("PLL locked", check=True)
     return rec
 
 
@@ -38,18 +38,16 @@ def test_record_validates_against_schema(dev, api):
     json.loads(json.dumps(record))  # strictly JSON
 
 
-ROOT = str(Path(__file__).resolve().parents[1])
-
-
 def test_record_contents(dev, api):
-    record = to_dict(make_record(dev, api), root=ROOT)
-    assert record["test"]["id"] == "test_example"
-    assert record["test"]["status"] == "passed"
-    assert record["unscoped"][0]["number"] is None
+    (test,) = to_dict(make_record(dev, api), root=str(ROOT))["tests"]
+    assert test["id"] == "test_example"
+    assert test["status"] == "passed"
+    assert test["unscoped"][0]["number"] is None
 
-    configure, create = record["steps"]
+    configure, create, leaf = test["steps"]
     mode_write, set_level = configure["entries"]
     assert mode_write["number"] == "1.1"
+    assert mode_write["direction"] == "in"
     assert mode_write["value"] == {
         "concrete": {"$type": "tests.test_record.Mode", "$enum": "ACTIVE", "value": 1},
         "symbolic": "<mode>",
@@ -59,10 +57,14 @@ def test_record_contents(dev, api):
     assert set_level["entries"][0]["number"] == "1.2.1"
 
     (post,) = create["entries"]
+    assert post["direction"] == "exchange"
     assert post["target"] == {"concrete": "POST /users", "symbolic": "POST /users"}
     assert post["value"]["symbolic"] == '{"name": <name>, "age": 3}'
     assert post["meta"]["status"] == 201
-    assert post["location"]["file"] == "tests/test_record.py"  # relative to the project root
+    assert post["location"]["file"] == "tests/test_record.py"
+
+    assert leaf["title"] == "PLL locked" and leaf["status"] == "passed"
+    assert leaf["entries"][0]["type"] == "check" and leaf["entries"][0]["passed"] is True
 
 
 def test_non_json_values_are_tagged():

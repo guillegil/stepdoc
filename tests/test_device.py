@@ -1,7 +1,7 @@
 """Hardware example: device register reads and writes."""
 
 from stepdoc import look_through, step
-from stepdoc.renderers.text import render_procedure, render_report
+from tests.helpers import procedure, report
 
 
 @step("Wait for PLL lock")
@@ -36,7 +36,7 @@ def test_output_by_mode(dev, rec):
         vout = dev.map.adc.value
         assert vout == level // 2
 
-    assert render_procedure(rec).splitlines() == [
+    assert procedure(rec) == [
         "1. Select mode and level",
         "   1.1. dev.map.ctrl.mode = <mode>",
         "   1.2. dev.map.dac.level = <level>",
@@ -49,9 +49,9 @@ def test_output_by_mode(dev, rec):
         "3. Measure output",
         "   3.1. Read dev.map.adc.value -> <vout>",
     ]
-    report = render_report(rec)
-    assert "   1.2. dev.map.dac.level = 2048" in report
-    assert "   3.1. Read dev.map.adc.value -> 1024" in report
+    text = report(rec)
+    assert "   1.2. dev.map.dac.level = 2048" in text
+    assert "   3.1. Read dev.map.adc.value -> 1024" in text
 
 
 def test_nested_steps_share_numbering_with_actions(dev, rec):
@@ -66,7 +66,7 @@ def test_nested_steps_share_numbering_with_actions(dev, rec):
     with step("Done"):
         pass
 
-    assert render_procedure(rec).splitlines() == [
+    assert procedure(rec) == [
         "1. Configure",
         "   1.1. dev.map.ctrl.mode = <mode>",
         "   1.2. Set level",
@@ -139,7 +139,7 @@ def test_exec_without_source_falls_back(dev, rec):
     (a,) = rec.unscoped
     assert a.symbolic is False
     assert a.value == 9
-    assert "9  (concrete)" in render_procedure(rec)
+    assert procedure(rec) == ["Unscoped", "   - dev.map.pulse.width = 9"]
 
 
 def test_unscoped_actions_are_kept(dev, rec):

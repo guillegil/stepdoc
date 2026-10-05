@@ -5,7 +5,7 @@ import asyncio
 import httpx
 
 from stepdoc import look_through, step
-from stepdoc.renderers.text import render_procedure, render_report
+from tests.helpers import procedure, report
 from tests.conftest import async_http_bridge
 from tests.fakes.fake_api import fake_api_transport
 
@@ -33,8 +33,7 @@ def test_user_lifecycle(api, rec):
     with step("Delete user"):
         r = api.delete(f"/users/{user_id}")
 
-    proc = render_procedure(rec)
-    assert proc.splitlines() == [
+    assert procedure(rec) == [
         "1. Create user",
         '   1.1. POST /users  {"name": <name>, "age": <age>}',
         "2. Read user back",
@@ -42,9 +41,9 @@ def test_user_lifecycle(api, rec):
         "3. Delete user",
         "   3.1. DELETE /users/<user_id>",
     ]
-    report = render_report(rec)
-    assert "   1.1. POST /users  {'name': 'Ana', 'age': 0}  -> 201" in report
-    assert "   2.1. GET /users/1  -> 200" in report
+    text = report(rec)
+    assert "   1.1. POST /users  {'name': 'Ana', 'age': 0} -> 201" in text
+    assert "   2.1. GET /users/1 -> 200" in text
 
 
 def test_literals_and_expressions(api, rec):
