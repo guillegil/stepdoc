@@ -7,6 +7,7 @@ from .common import (
     STATUS_MARK,
     Line,
     Record,
+    anchors,
     procedures,
     short_name,
     show,
@@ -41,9 +42,22 @@ def _md_line(line: Line) -> str:
 
 def render_procedure(record: Record, title: str = "Test procedures") -> str:
     out = [f"# {title}", ""]
-    for proc in procedures(record):
+    procs = procedures(record)
+    ids = anchors([p.procedure_id for p in procs])
+    if len(procs) > 1:  # OUT-5: contents with test ids
+        out += ["**Contents**", ""]
+        out += [f"{i}. [{short_name(p.procedure_id)}](#{a}) · {_code(p.procedure_id)}" for i, (a, p) in enumerate(zip(ids, procs), 1)]
+        out.append("")
+    for anchor, proc in zip(ids, procs):
         n = len(proc.cases)
-        out += [f"## {short_name(proc.procedure_id)}", "", f"_{proc.procedure_id} · {n} case{'s' * (n != 1)}_", ""]
+        out += [
+            f'<a id="{anchor}"></a>',
+            "",
+            f"## {short_name(proc.procedure_id)}",
+            "",
+            f"_{proc.procedure_id} · {n} case{'s' * (n != 1)}_",
+            "",
+        ]
         params = proc.params
         if params:
             out += ["**Parameters**", "", "| Parameter | Values |", "|---|---|"]
@@ -74,14 +88,15 @@ def render_report(record: Record, title: str = "Test report") -> str:
     out = [f"# {title}", ""]
     if record.get("dry_run"):
         out += ["_Dry run: results were not judged._", ""]
+    ids = anchors([t["id"] for t in tests])
     out += ["| Test | Outcome | Steps |", "|---|---|---|"]
-    for t in tests:
+    for anchor, t in zip(ids, tests):
         verdict = OUTCOME_TEXT.get(t["outcome"], "?")
-        out.append(f"| {_code(t['id'])} | {verdict} | {STATUS_MARK.get(t['status'], '?')} |")
+        out.append(f"| [{_code(t['id'])}](#{anchor}) | {verdict} | {STATUS_MARK.get(t['status'], '?')} |")
     out.append("")
-    for t in tests:
+    for anchor, t in zip(ids, tests):
         verdict = "DRY RUN" if t["dry_run"] else OUTCOME_TEXT.get(t["outcome"], "?")
-        out += [f"## {short_name(t['id'])} — {verdict}", ""]
+        out += [f'<a id="{anchor}"></a>', "", f"## {short_name(t['id'])} — {verdict}", ""]
         meta = [t["id"], t["started_at"]]
         if t["duration"] is not None:
             meta.append(f"{t['duration'] * 1000:.0f} ms")

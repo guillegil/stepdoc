@@ -265,3 +265,10 @@ def test_fixture_steps_go_to_setup_and_teardown(fixture_project):
     for text in ("**Setup**", "**S1. Power up bench**", "**Procedure**", "**T2. Power down bench**"):
         assert text in procedure
     assert procedure.index("**S2. Configure**") < procedure.index("**1. Set level**") < procedure.index("**T1. Restore**")
+
+
+def test_format_follows_the_file_extension(project):
+    result = run(project, "--stepdoc-procedure=out/procedure.html", "--stepdoc-report=out/report.txt")
+    result.assert_outcomes(passed=2, failed=1)
+    assert (project.path / "out/procedure.html").read_text().startswith("<!doctype html>")
+    assert "test_dev.py::test_levels[20]   FAILED" in (project.path / "out/report.txt").read_text()

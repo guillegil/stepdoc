@@ -30,7 +30,8 @@ jobs:
         run: uv run mypy
       - name: Build
         run: uv build
-      - name: Wheel ships the plugin entry point, schema and py.typed
+      - name: Wheel ships the plugin and CLI entry points, schema and py.typed
         run: |
           unzip -l dist/*.whl | grep -E "py.typed|run-record.schema.json"
           unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.pytest_plugin"
+          unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.cli:main"
