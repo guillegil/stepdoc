@@ -166,6 +166,23 @@ stepdoc render out/run.json                          # procedure as Markdown on 
 stepdoc render out/run.json --doc report --format text
 ```
 
+## Agent skill
+
+stepdoc ships a skill that teaches AI coding agents (Claude Code, Codex, GitHub
+Copilot and others) to write tests with stepdoc and review the procedure:
+
+```bash
+stepdoc skill install            # .claude/skills/ and .agents/skills/ in this repository
+stepdoc skill install --claude   # only .claude/skills/ (--agents for only .agents/skills/)
+stepdoc skill install --global   # in your home folder instead
+stepdoc skill status             # where it is installed, and whether it is outdated
+stepdoc skill uninstall
+```
+
+Reinstalling an unchanged copy does nothing; a copy you edited is never
+overwritten or removed without `--force`. `--print` shows the skill instead of
+writing it.
+
 ## Without pytest
 
 `stepdoc.core` never imports pytest, so the same API works in scripts and test stations:
