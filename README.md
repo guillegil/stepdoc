@@ -151,6 +151,11 @@ enable_assertion_pass_hook = true
 
 Without any of these options the plugin records nothing and prints nothing.
 
+All options work with pytest-xdist (`-n 4`): each worker records the tests it
+runs, and the main process writes one record and one set of documents, with
+tests in collection order. Tests on a worker that crashes are missing from the
+documents.
+
 The session-scoped `stepdoc_dry_run` fixture (or `stepdoc.is_dry_run(config)`) tells your fixtures
 to use a simulated backend. Python evaluates arguments eagerly and dry-run only
 documents the branches the simulation takes.

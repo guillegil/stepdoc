@@ -7,6 +7,7 @@ stepdoc output option or ``--stepdoc-dry-run`` is passed (NFR-8).
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Generator, Optional
@@ -35,6 +36,12 @@ class _State:
         self.root = str(config.rootpath)
         self.collapse_repeats: bool = config.getini("stepdoc_collapse_repeats")
         self.cases: list[dict[str, Any]] = []
+        # pytest-xdist (PAR-1): workers record, the controller merges and writes.
+        self.worker = hasattr(config, "workerinput")
+        self.order: dict[str, int] = {}  # test id -> collection index
+
+
+_WORKER_KEY = "stepdoc_cases"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -58,8 +65,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     state = _State(config)
     config.stash[_state_key] = state
-    if state.active and hasattr(config, "workerinput"):
-        raise pytest.UsageError("stepdoc does not support pytest-xdist yet; run without -n")
     skip = config.getini("stepdoc_skip_modules")
     if skip:
         set_skip_modules(skip)
@@ -70,6 +75,12 @@ def stepdoc_dry_run(request: pytest.FixtureRequest) -> bool:
     """True when running with ``--stepdoc-dry-run`` (DRY-2). Session-scoped, so
     session fixtures (a device, a mock server) can use it too."""
     return is_dry_run(request.config)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    # Cases are written in collection order, whichever worker ran them first.
+    state: _State = session.config.stash[_state_key]
+    state.order = {item.nodeid: i for i, item in enumerate(session.items)}
 
 
 def _params(item: pytest.Item) -> tuple[Optional[str], dict[str, Any]]:
@@ -154,11 +165,34 @@ def pytest_assertion_pass(item: pytest.Item, lineno: int, orig: str, expl: str) 
     rec.add_check(Check(text=orig, passed=True, location=Location(str(item.path), lineno)))
 
 
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: Any, error: Any) -> None:
+    """pytest-xdist controller: collect the cases a worker recorded."""
+    state: Optional[_State] = node.config.stash.get(_state_key, None)
+    output = getattr(node, "workeroutput", None) or {}
+    if state is None or _WORKER_KEY not in output:
+        return  # inactive, or the worker crashed before sending anything
+    payload = json.loads(output[_WORKER_KEY])
+    state.cases.extend(payload["cases"])
+    for test_id, index in payload["order"].items():
+        state.order.setdefault(test_id, index)
+
+
 def pytest_sessionfinish(session: pytest.Session) -> None:
     state: Optional[_State] = session.config.stash.get(_state_key, None)
-    if state is None or not state.active or not state.cases:
+    if state is None or not state.active:
         return
-    record = run_record(state.cases, dry_run=state.dry_run)
+    if state.worker:
+        # Every value is already JSON-safe (to_jsonable); a string keeps it so
+        # through execnet, which only carries plain built-in types.
+        workeroutput = session.config.workeroutput  # type: ignore[attr-defined]
+        workeroutput[_WORKER_KEY] = json.dumps({"cases": state.cases, "order": state.order})
+        return
+    if not state.cases:
+        return
+    last = len(state.order)
+    cases = sorted(state.cases, key=lambda c: state.order.get(c["id"], last))
+    record = run_record(cases, dry_run=state.dry_run)
     written = []
     if state.record_path:
         written.append(_write(state.record_path, dumps(record)))

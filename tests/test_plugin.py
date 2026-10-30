@@ -272,3 +272,42 @@ def test_format_follows_the_file_extension(project):
     result.assert_outcomes(passed=2, failed=1)
     assert (project.path / "out/procedure.html").read_text().startswith("<!doctype html>")
     assert "test_dev.py::test_levels[20]   FAILED" in (project.path / "out/report.txt").read_text()
+
+
+TIMES = {"started_at", "duration", "t", "t_last", "started", "ended"}
+
+
+def _without_times(value):
+    """A record with every timing field dropped, for comparing two runs."""
+    if isinstance(value, dict):
+        return {k: _without_times(v) for k, v in value.items() if k not in TIMES}
+    if isinstance(value, list):
+        return [_without_times(v) for v in value]
+    return value
+
+
+def test_xdist_workers_merge_into_one_record(project):
+    project.makepyfile(test_more="def test_a(dev):\n    dev.write('x', 1)\n\n\ndef test_b(dev):\n    dev.write('y', 2)\n")
+    serial = project.runpytest_subprocess("-p", "no:cacheprovider", "--stepdoc-record=serial.json")
+    parallel = project.runpytest_subprocess(
+        "-p", "no:cacheprovider", "-n", "2", "--stepdoc-record=run.json",
+        "--stepdoc-procedure=procedure.md", "--stepdoc-report=report.md",
+    )
+    assert serial.ret == parallel.ret == 1  # the same failing case in both runs
+    parallel.stdout.fnmatch_lines(["*stepdoc: wrote run.json*", "*stepdoc: wrote report.md*"])
+    one = json.loads((project.path / "serial.json").read_text())
+    many = json.loads((project.path / "run.json").read_text())
+    jsonschema.validate(many, SCHEMA)
+    # Same cases, in collection order, whichever worker finished first.
+    assert [t["id"] for t in many["tests"]] == [t["id"] for t in one["tests"]]
+    assert len(many["tests"]) == 5
+    assert _without_times(many["tests"]) == _without_times(one["tests"])
+    assert "test_a" in (project.path / "procedure.md").read_text()
+
+
+def test_xdist_dry_run(project):
+    result = project.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2", "--stepdoc-dry-run",
+                                          "--stepdoc-record=run.json")
+    assert result.ret == 0
+    record = json.loads((project.path / "run.json").read_text())
+    assert record["dry_run"] and all(t["dry_run"] for t in record["tests"])
