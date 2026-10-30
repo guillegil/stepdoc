@@ -18,6 +18,15 @@ stepdoc records checks; it never compares values itself. A check is one of:
 - A read on the same source line is shown on the check's line:
   `Verify dev.map.adc.value == 1024 -> got 1024`.
 
+## pytest-verifier
+
+With pytest-verifier installed, `verify.*` checks are recorded through stepdoc's
+verify adapter: each becomes a "Verify …" line in the step it ran in. Don't wrap
+them in `check=` or `attach_check`. Give the expected value as a name or an
+expression (`verify.equal(r.json()["age"], age, name="Stored age")`) so the
+procedure reads `== <age>` instead of one run's number. If the procedure shows
+`?` steps, the adapter is off (`stepdoc_adapters`).
+
 ## step(check=...)
 
 `step(title, check=value)` records a one-line step holding one check. It is not a

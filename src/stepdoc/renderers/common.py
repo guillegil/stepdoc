@@ -114,7 +114,7 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
                 result = "got " + ", ".join(
                     f"{r['target']['concrete']} = {show(r['value']['concrete'])}" for r in reads
                 )
-    code = c["text"]
+    code = (c.get("symbolic_text") or c["text"]) if symbolic else c["text"]
     if c.get("selected"):
         code += f" [→ {c['selected']}]"
     return Line(c.get("number"), "Verify", code, result, mark=mark, depth=depth)
@@ -228,6 +228,38 @@ class Procedure:
                 if shown not in values:
                     values.append(shown)
         return table
+
+
+    @property
+    def param_table(self) -> list[tuple[str, Optional[str], list[str]]]:
+        """``(name, description, values)`` per parameter. An adapter's domain
+        (``integer 0 … 4095``) replaces the list of sampled values (DRY-4)."""
+        info: dict[str, Record] = {}
+        for case in self.cases:
+            for name, item in (case.get("param_info") or {}).items():
+                info.setdefault(name, item)
+        rows = []
+        for name, values in self.params.items():
+            item = info.get(name) or {}
+            domain = item.get("domain")
+            rows.append((name, item.get("description"), [domain] if domain else values))
+        return rows
+
+    @property
+    def strategy(self) -> Optional[str]:
+        """The generator of the cases' values, when an adapter names it."""
+        names = {(c.get("vector") or {}).get("strategy") for c in self.cases}
+        names.discard(None)
+        return names.pop() if len(names) == 1 else None
+
+
+def vector_note(test: Record) -> Optional[str]:
+    """``directed: youngest``, ``random``: which generated row a case runs."""
+    vector = test.get("vector") or {}
+    kind, name = vector.get("kind"), vector.get("name")
+    if not kind:
+        return None
+    return f"{kind}: {name}" if name else str(kind)
 
 
 def procedures(record: Record) -> list[Procedure]:

@@ -14,7 +14,8 @@ from typing import Any, Generator, Optional
 
 import pytest
 
-from .core.model import Check, Location, Section
+from . import adapters as _adapters
+from .core.model import Check, Location, Section, Step
 from .core.record import case_record, dumps, run_record
 from .core.recorder import Recorder, current_recorder, is_dry_run
 from .core.symbolic import set_skip_modules
@@ -39,6 +40,8 @@ class _State:
         # pytest-xdist (PAR-1): workers record, the controller merges and writes.
         self.worker = hasattr(config, "workerinput")
         self.order: dict[str, int] = {}  # test id -> collection index
+        self.adapters: list[_adapters.Adapter] = []
+        self.unseen_judges: list[_adapters.Adapter] = []  # judging tools whose adapter is off (NFR-7)
 
 
 _WORKER_KEY = "stepdoc_cases"
@@ -60,6 +63,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                        "(drivers, clients, bridges' libraries)")
     parser.addini("stepdoc_collapse_repeats", type="bool", default=True,
                   help="collapse repeated reads or calls from one source line (polling) into one line")
+    parser.addini("stepdoc_adapters", type="linelist", default=[],
+                  help="adapters to run (default: every adapter whose tool is installed); "
+                       "'-name' leaves one out, 'none' runs none")
+
+
+def pytest_addhooks(pluginmanager: pytest.PytestPluginManager) -> None:
+    from . import hookspecs
+
+    pluginmanager.add_hookspecs(hookspecs)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -68,6 +80,25 @@ def pytest_configure(config: pytest.Config) -> None:
     skip = config.getini("stepdoc_skip_modules")
     if skip:
         set_skip_modules(skip)
+    if state.active:
+        _start_adapters(config, state)
+
+
+def _start_adapters(config: pytest.Config, state: _State) -> None:
+    known = _adapters.discover()
+    state.adapters = _adapters.select(known, config, config.getini("stepdoc_adapters"))
+    on = {a.name for a in state.adapters}
+    state.unseen_judges = [a for a in known.values() if a.judges and a.name not in on and a.installed(config)]
+    host = _adapters.Host(config)
+    for adapter in state.adapters:
+        plugin = adapter.activate(host)
+        if plugin is not None:
+            config.pluginmanager.register(plugin, f"stepdoc-adapter-{adapter.name}")
+
+
+def recorder_for(item: pytest.Item) -> Optional[Recorder]:
+    """The recorder of a test while stepdoc records it, for adapters."""
+    return item.stash.get(_recorder_key, None)
 
 
 @pytest.fixture(scope="session")
@@ -97,12 +128,23 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
         return (yield)
     rec = Recorder(item.nodeid, dry_run=state.dry_run, collapse_repeats=state.collapse_repeats)
     item.stash[_recorder_key] = rec
+
+    def notify(event: str, s: Step) -> None:
+        hook = item.ihook.pytest_stepdoc_step_started if event == "started" else item.ihook.pytest_stepdoc_step_finished
+        hook(item=item, step=s)
+
+    rec.listeners.append(notify)
     try:
         with rec:
             return (yield)
     finally:
         case, params = _params(item)
         procedure_id = item.nodeid.split("[", 1)[0]
+        extra: dict[str, Any] = {}
+        for adapter in state.adapters:
+            extra.update(adapter.case(item))
+        if any(judge.uses(item) for judge in state.unseen_judges):
+            rec.mark_unknown()
         state.cases.append(
             case_record(
                 rec,
@@ -112,6 +154,7 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
                 case=case,
                 params=params,
                 outcome=item.stash.get(_outcome_key, None),
+                **extra,
             )
         )
 
@@ -193,6 +236,7 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     last = len(state.order)
     cases = sorted(state.cases, key=lambda c: state.order.get(c["id"], last))
     record = run_record(cases, dry_run=state.dry_run)
+    session.config.hook.pytest_stepdoc_record_ready(config=session.config, record=record)
     written = []
     if state.record_path:
         written.append(_write(state.record_path, dumps(record)))

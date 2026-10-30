@@ -20,10 +20,10 @@ from typing import Any, Iterable, Optional, Union
 from .model import Action, Check, Location, Step
 from .recorder import Recorder
 
-SCHEMA_ID = "urn:stepdoc:schema:run-record:0.2"  # no published URL yet
-SCHEMA_VERSION = "0.2"
-READABLE_VERSIONS = ("0.1", "0.2")
-"""0.2 only adds fields; renderers read 0.1 records too."""
+SCHEMA_ID = "urn:stepdoc:schema:run-record:0.3"  # no published URL yet
+SCHEMA_VERSION = "0.3"
+READABLE_VERSIONS = ("0.1", "0.2", "0.3")
+"""Each version only adds fields; renderers read older records too."""
 
 
 def version() -> str:
@@ -114,6 +114,7 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         "reads": [_action(a, ctx) for a in c.reads],
         "location": ctx.loc(c.location),
         **_section(c.section),
+        **({} if c.symbolic_text is None else {"symbolic_text": c.symbolic_text}),
     }
 
 
@@ -154,9 +155,15 @@ def case_record(
     params: Optional[dict[str, Any]] = None,
     outcome: Optional[str] = None,
     seed: Any = None,
+    param_info: Optional[dict[str, dict[str, Any]]] = None,
+    vector: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """One test case. ``procedure_id`` groups cases that share a procedure (the
-    test without its parameter id); ``outcome`` is the runner's verdict."""
+    test without its parameter id); ``outcome`` is the runner's verdict.
+    ``param_info`` describes parameters (PAR-3: ``{"level": {"domain": "integer
+    0 … 4095", "description": "DAC code"}}``) and ``vector`` names the generated
+    row the case runs (``{"source": "strategy", "strategy": "new_user", "kind":
+    "directed", "name": "youngest"}``); adapters provide both."""
     rec.resolve()
     ctx = _Ctx(rec.started, os.getcwd() if root is None else root)
     tid = test_id or rec.name
@@ -173,6 +180,8 @@ def case_record(
         "duration": ctx.t(rec.ended),
         "unscoped": [_entry(e, ctx) for e in rec.unscoped],
         "steps": [_step(s, ctx) for s in rec.steps],
+        **({"param_info": to_jsonable(param_info)} if param_info else {}),
+        **({"vector": to_jsonable(vector)} if vector else {}),
     }
 
 

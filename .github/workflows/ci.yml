@@ -39,5 +39,7 @@ jobs:
           unzip -l dist/*.whl | grep -E "py.typed|run-record.schema.json"
           unzip -l dist/*.whl | grep -F "stepdoc/skill/SKILL.md"
           unzip -l dist/*.whl | grep -F "stepdoc/skill/references/bridges.md"
+          unzip -l dist/*.whl | grep -F "stepdoc/adapters/verify.py"
+          unzip -l dist/*.whl | grep -F "stepdoc/hookspecs.py"
           unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.pytest_plugin"
           unzip -p dist/*.whl '*/entry_points.txt' | grep -F "stepdoc = stepdoc.cli:main"

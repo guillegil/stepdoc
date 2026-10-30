@@ -148,6 +148,7 @@ enable_assertion_pass_hook = true
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
 | `stepdoc_collapse_repeats` (ini) | Collapse polling into one line (default `true`) |
+| `stepdoc_adapters` (ini) | Adapters to run. Default: every adapter whose tool is installed. `-verify` leaves one out, `none` runs none |
 
 Without any of these options the plugin records nothing and prints nothing.
 
@@ -159,6 +160,31 @@ documents.
 The session-scoped `stepdoc_dry_run` fixture (or `stepdoc.is_dry_run(config)`) tells your fixtures
 to use a simulated backend. Python evaluates arguments eagerly and dry-run only
 documents the branches the simulation takes.
+
+## Adapters
+
+stepdoc works with other pytest plugins without depending on them, and they
+don't depend on stepdoc. When one of them is installed, its adapter reads what
+the plugin already publishes:
+
+- **pytest-verifier**: each `verify.*` check becomes a "Verify …" line in the
+  step it was made in, taken from the `pytest_verify_results` hook. An expected
+  value given by name is symbolic in the procedure (`Verify 'Stored age' ==
+  <age>`) and concrete in the report (`== 30 -> got 31 ✗`).
+- **pytest-strategies**: the report shows each case's seed and the row it ran
+  (`directed: youngest`), and the procedure's parameter table shows what each
+  argument draws from (`integer 0 … 120`) instead of the sampled values.
+
+If a plugin that judges checks runs with its adapter off, stepdoc can't see
+those checks, so it shows the steps of the tests that use it as `?`, never ✓,
+next to the test's own verdict. In dry-run, verify's checks are documented as
+not judged, but verify still judges them, so a failing one still fails the test.
+
+Other packages can ship adapters through the `stepdoc.adapters` entry-point
+group (a subclass of `stepdoc.adapters.Adapter`). Plugins can also follow steps
+without importing stepdoc, through the `pytest_stepdoc_step_started`,
+`pytest_stepdoc_step_finished` and `pytest_stepdoc_record_ready` hooks
+(implement them with `@pytest.hookimpl(optionalhook=True)`).
 
 ## Rendering a saved record
 
