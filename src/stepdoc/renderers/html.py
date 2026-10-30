@@ -17,6 +17,7 @@ from .common import (
     short_name,
     show,
     test_lines,
+    vector_note,
 )
 
 _CSS = """
@@ -139,14 +140,19 @@ def _toc(items: list[tuple[str, str, Optional[str]]]) -> list[str]:
 
 
 def _params_table(proc: Procedure) -> list[str]:
-    params = proc.params
-    if not params:
+    table = proc.param_table
+    if not table:
         return []
+    described = any(d for _, d, _ in table)
     rows = "".join(
-        f"<tr><td>{_code(name)}</td><td>{', '.join(_code(v) for v in values)}</td></tr>"
-        for name, values in params.items()
+        f"<tr><td>{_code(name)}</td>"
+        + (f"<td>{escape(description or '')}</td>" if described else "")
+        + f"<td>{', '.join(_code(v) for v in values)}</td></tr>"
+        for name, description, values in table
     )
-    return ["<h3>Parameters</h3>", f"<table><tr><th>Parameter</th><th>Values</th></tr>{rows}</table>"]
+    head = "<tr><th>Parameter</th>" + ("<th>Description</th>" if described else "") + "<th>Values</th></tr>"
+    title = "Parameters" + (f" (strategy {_code(proc.strategy)})" if proc.strategy else "")
+    return [f"<h3>{title if proc.strategy else escape(title)}</h3>", f"<table>{head}{rows}</table>"]
 
 
 def render_procedure(record: Record, title: str = "Test procedures") -> str:
@@ -207,6 +213,7 @@ def render_report(record: Record, title: str = "Test report") -> str:
         body.append(f'<p class="meta">{escape(" · ".join(meta))}</p>')
         if t["params"]:
             params = ", ".join(_code(f"{k} = {show(v)}") for k, v in t["params"].items())
-            body.append(f"<p>Parameters: {params}</p>")
+            note = vector_note(t)
+            body.append(f"<p>Parameters: {params}" + (f" ({escape(note)})" if note else "") + "</p>")
         body.append(_lines(test_lines(t, symbolic=False)))
     return _page(title, record, body)

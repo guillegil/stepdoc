@@ -12,6 +12,7 @@ from .common import (
     short_name,
     show,
     test_lines,
+    vector_note,
 )
 
 
@@ -58,11 +59,18 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
             f"_{proc.procedure_id} · {n} case{'s' * (n != 1)}_",
             "",
         ]
-        params = proc.params
-        if params:
-            out += ["**Parameters**", "", "| Parameter | Values |", "|---|---|"]
-            for name, values in params.items():
-                out.append(f"| {_code(name)} | {', '.join(_code(v) for v in values)} |")
+        rows = proc.param_table
+        if rows:
+            heading = "**Parameters**" + (f" (strategy {_code(proc.strategy)})" if proc.strategy else "")
+            described = any(d for _, d, _ in rows)
+            out += [heading, ""]
+            if described:
+                out += ["| Parameter | Description | Values |", "|---|---|---|"]
+            else:
+                out += ["| Parameter | Values |", "|---|---|"]
+            for name, description, values in rows:
+                cells = [_code(name)] + ([description or ""] if described else []) + [", ".join(_code(v) for v in values)]
+                out.append("| " + " | ".join(cells) + " |")
             out.append("")
         if proc.setup is not None:
             out += [_md_line(line) for line in test_lines(proc.setup, symbolic=True, sections=("setup",))]
@@ -104,7 +112,9 @@ def render_report(record: Record, title: str = "Test report") -> str:
             meta.append(f"seed {show(t['seed'])}")
         out += [f"_{' · '.join(meta)}_", ""]
         if t["params"]:
-            out += ["Parameters: " + ", ".join(_code(f"{k} = {show(v)}") for k, v in t["params"].items()), ""]
+            note = vector_note(t)
+            line = "Parameters: " + ", ".join(_code(f"{k} = {show(v)}") for k, v in t["params"].items())
+            out += [line + (f" ({note})" if note else ""), ""]
         out += [_md_line(line) for line in test_lines(t, symbolic=False)]
         out.append("")
     return "\n".join(out).rstrip() + "\n"

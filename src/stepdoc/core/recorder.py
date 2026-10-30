@@ -25,6 +25,8 @@ from .redaction import _SCALARS, redact, redact_text
 from .symbolic import assert_source, capture
 
 F = TypeVar("F", bound=Callable[..., Any])
+Listener = Callable[[str, Step], None]
+"""Called with ``"started"`` or ``"finished"`` and the step (EXT-1)."""
 
 _current: ContextVar[Optional["Recorder"]] = ContextVar("stepdoc_recorder", default=None)
 _perf = time.perf_counter
@@ -63,6 +65,7 @@ class Recorder:
         self._tokens: list[Any] = []
         self._quiet = 0
         self._names: list[tuple[str, Any]] = []
+        self.listeners: list[Listener] = []
 
     # Activation ----------------------------------------------------------- #
     def __enter__(self) -> "Recorder":
@@ -95,7 +98,12 @@ class Recorder:
         else:
             parent.entries.append(s)
         self._stack.append(s)
+        self._notify("started", s)
         return s
+
+    def _notify(self, event: str, s: Step) -> None:
+        for listener in self.listeners:
+            listener(event, s)
 
     def _close(self, s: Step, exc: Optional[BaseException]) -> bool:
         """Close ``s``; returns True when ``exc`` must be swallowed (dry-run only)."""
@@ -119,6 +127,7 @@ class Recorder:
             s.error = f"{type(exc).__name__}: {exc}"
         statuses = own + [_entry_status(e) for e in s.entries if not isinstance(e, Action)]
         s.status = "unknown" if self.dry_run else combine(statuses)
+        self._notify("finished", s)
         return swallow
 
     @property
@@ -180,6 +189,38 @@ class Recorder:
         self._stack.pop()
         s.status = "unknown" if self.dry_run else check_status(check)
         return s
+
+    def insert_check(self, path: Sequence[Step], check: Check, index: Optional[int] = None) -> None:
+        """Add ``check`` to a step that may have finished already, for checks that
+        arrive after the fact (an adapter reading another tool's results). ``path``
+        runs from a top-level step down to the target step; an empty path means the
+        unscoped section. The check goes at ``index`` among the step's entries (the
+        end by default), entries are renumbered, and the statuses along ``path``
+        take the check's result into account."""
+        if self.dry_run:
+            _unjudge(check)
+        if not path:
+            check.section = check.section or self.section
+            self.unscoped.append(check)
+            return
+        target = path[-1]
+        target.entries.insert(len(target.entries) if index is None else index, check)
+        _renumber(target)
+        if not self.dry_run:
+            for s in path:
+                s.status = combine([s.status, check_status(check)])
+
+    def mark_unknown(self) -> None:
+        """NFR-7: a judge stepdoc cannot see ran in this test, so no step can be
+        shown as passed. Failed and errored steps keep their status."""
+
+        def walk(steps: Sequence[Step]) -> None:
+            for s in steps:
+                if s.status == "passed":
+                    s.status = "unknown"
+                walk(s.children)
+
+        walk(self.steps)
 
     # Resolution ----------------------------------------------------------- #
     def resolve(self) -> None:
@@ -264,6 +305,13 @@ def _tb_location(exc: BaseException) -> Optional[Location]:
     while tb.tb_next is not None:
         tb = tb.tb_next
     return Location(tb.tb_frame.f_code.co_filename, tb.tb_lineno)
+
+
+def _renumber(s: Step) -> None:
+    for i, e in enumerate(s.entries, 1):
+        e.number = f"{s.number}.{i}"
+        if isinstance(e, Step):
+            _renumber(e)
 
 
 def _entry_status(e: Union[Check, Step]) -> Status:

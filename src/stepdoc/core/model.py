@@ -126,6 +126,9 @@ class Check:
     read by ``assert dev.status.ok == 1``. They are shown on the check's line."""
     section: Optional[Section] = None
     """Set on unscoped checks only, like ``Action.section``."""
+    symbolic_text: Optional[str] = None
+    """Text for the procedure when it differs from ``text``: an adapter's check whose
+    expected value came from a name (``'Stored age' == <age>``)."""
 
 
 Entry = Union[Action, Check, "Step"]

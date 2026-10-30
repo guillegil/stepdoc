@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from .common import OUTCOME_TEXT, Record, procedure_lines, procedures, report_lines
+from .common import OUTCOME_TEXT, Record, procedure_lines, procedures, report_lines, vector_note
 
 
 def render_procedure(record: Record) -> str:
     out: list[str] = []
     for proc in procedures(record):
         out.append(proc.procedure_id)
-        params = proc.params
-        if params:
-            out.append("Parameters:")
-            width = max(len(n) for n in params)
-            for name, values in params.items():
-                out.append(f"  {name.ljust(width)}   {', '.join(values)}")
+        rows = proc.param_table
+        if rows:
+            out.append("Parameters" + (f' (strategy "{proc.strategy}")' if proc.strategy else "") + ":")
+            width = max(len(n) for n, _, _ in rows)
+            dwidth = max(len(d or "") for _, d, _ in rows)
+            for name, description, values in rows:
+                middle = f"{(description or '').ljust(dwidth)}   " if dwidth else ""
+                out.append(f"  {name.ljust(width)}   {middle}{', '.join(values)}")
         if proc.setup is not None:
             out.extend(procedure_lines(proc.setup, ("setup",)))
         for lines, members in proc.variants:
@@ -35,7 +37,8 @@ def render_report(record: Record) -> str:
         verdict = "DRY-RUN" if test["dry_run"] else OUTCOME_TEXT.get(test["outcome"], test["status"].upper())
         out.append(f"{test['id']}   {verdict}")
         if test["params"]:
-            out.append("  " + ", ".join(f"{k}={v!r}" for k, v in test["params"].items()))
+            note = vector_note(test)
+            out.append("  " + ", ".join(f"{k}={v!r}" for k, v in test["params"].items()) + (f" ({note})" if note else ""))
         out.extend(report_lines(test))
         out.append("")
     return "\n".join(out).rstrip() + "\n"
