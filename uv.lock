@@ -611,7 +611,7 @@ wheels = [
 
 [[package]]
 name = "stepdoc"
-version = "0.0.1.dev0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "executing" },

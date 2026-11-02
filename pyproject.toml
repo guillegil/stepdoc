@@ -4,12 +4,32 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stepdoc"
-version = "0.0.1.dev0"
+version = "0.2.0"
 description = "Turn test code into test documentation: procedures with symbolic values and executed reports."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["executing>=2.0"]
+authors = [{ name = "Guillermo Gil" }]
+keywords = ["pytest", "testing", "documentation", "test procedure", "test report"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Documentation",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/guillegil/stepdoc"
+Source = "https://github.com/guillegil/stepdoc"
+Changelog = "https://github.com/guillegil/stepdoc/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 pytest = ["pytest>=8"]

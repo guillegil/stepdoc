@@ -10,7 +10,7 @@ writes two documents:
 
 Both come from a JSON **run record**, so they can never drift apart from the code.
 
-Status: v0.2 in progress (brief §14). [SPIKE.md](SPIKE.md) has the design
+Status: 0.2 (alpha). See [CHANGELOG.md](CHANGELOG.md). [SPIKE.md](SPIKE.md) has the design
 measurements behind it.
 
 ## Quick look
