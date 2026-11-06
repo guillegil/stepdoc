@@ -13,10 +13,17 @@ import json
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Iterator, Optional, Sequence
+from typing import TYPE_CHECKING, Iterator, Optional, Sequence
+
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        from importlib.resources.abc import Traversable
+    else:
+        from importlib.abc import Traversable
 
 NAME = "stepdoc"
 MANIFEST = ".stepdoc-skill.json"
@@ -45,7 +52,7 @@ def skill_files(version: Optional[str] = None) -> dict[str, str]:
     root = resources.files("stepdoc") / "skill"
     files: dict[str, str] = {}
 
-    def walk(node: "resources.abc.Traversable", prefix: str) -> None:
+    def walk(node: Traversable, prefix: str) -> None:
         for child in sorted(node.iterdir(), key=lambda c: c.name):
             rel = f"{prefix}{child.name}"
             if child.is_dir():

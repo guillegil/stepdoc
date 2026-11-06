@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
+
 ## 0.2.0
 
 First release on PyPI.
