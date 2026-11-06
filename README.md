@@ -13,6 +13,10 @@ Both come from a JSON **run record**, so they can never drift apart from the cod
 Status: 0.2 (alpha). See [CHANGELOG.md](CHANGELOG.md). [SPIKE.md](SPIKE.md) has the design
 measurements behind it.
 
+stepdoc runs on Python 3.9 and above. On 3.9 and 3.10, placing a value on its
+source line the first time costs a few times more than on 3.11+ (once per line);
+recording itself costs about the same.
+
 ## Quick look
 
 ```python
@@ -234,5 +238,5 @@ uv sync
 uv run pytest
 uv run mypy
 uv run python bench/bench_events.py      # cost per recorded event
-uv run --python 3.11 pytest              # any supported Python (3.11+)
+uv run --python 3.11 pytest              # any supported Python (3.9+)
 ```

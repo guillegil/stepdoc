@@ -12,9 +12,19 @@ Third parties ship adapters through the ``stepdoc.adapters`` entry-point group
 
 from __future__ import annotations
 
+import sys
 from importlib import import_module
-from importlib.metadata import entry_points
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence
+
+if sys.version_info >= (3, 10):
+    from importlib.metadata import entry_points
+else:  # Python 3.9: entry_points() takes no group and returns a dict
+    from importlib.metadata import EntryPoint
+    from importlib.metadata import entry_points as _all_entry_points
+
+    def entry_points(*, group: str) -> Iterable[EntryPoint]:
+        """The entry points of ``group`` (the 3.10 ``entry_points(group=...)``)."""
+        return _all_entry_points().get(group, ())
 
 if TYPE_CHECKING:
     import pytest

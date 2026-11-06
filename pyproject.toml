@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Turn test code into test documentation: procedures with symbolic values and executed reports."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = ["executing>=2.0"]
 authors = [{ name = "Guillermo Gil" }]
 keywords = ["pytest", "testing", "documentation", "test procedure", "test report"]
@@ -17,6 +17,8 @@ classifiers = [
     "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -60,5 +62,5 @@ enable_assertion_pass_hook = true
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
+python_version = "3.10"
 files = ["src"]
