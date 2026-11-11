@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from types import CodeType, FrameType
-from typing import Any, Callable, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Iterator, Optional, Sequence, TypeVar, Union
 
 import executing
 
@@ -201,6 +202,11 @@ class Resolution:
     kwargs: dict[str, ast.expr] = field(default_factory=dict)
     param_names: tuple[str, ...] = ()
     target_source: Optional[str] = None
+    target_pattern: Optional[str] = None
+    """The target's source with its variable parts as ``<expr>`` (SYM-8), looking
+    through a local alias: ``reg = getattr(dut.block, f"reg{ch}")`` then
+    ``reg.value = v`` gives ``dut.block.reg<ch>.value``. ``None`` when nothing in
+    the target varies."""
     bound_to: Optional[str] = None
     helper_params: frozenset[str] = frozenset()
     outer: Optional["Resolution"] = None
@@ -327,6 +333,14 @@ def _statement_fallback(stmts: Any) -> Optional[ast.AST]:
 
 
 def _classify(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
+    res = _classify_node(node, callee)
+    target = node.func if isinstance(node, ast.Call) else node
+    if res.found and isinstance(target, ast.expr):
+        res.target_pattern = target_pattern(target)
+    return res
+
+
+def _classify_node(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
     parent = getattr(node, "parent", None)
 
     if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, ast.Store):
@@ -385,6 +399,163 @@ def _classify(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
         return Resolution(True, "read", target_source=_unparse(node), bound_to=bound)
 
     return Resolution(True, "other", target_source=_unparse(node))
+
+
+# --------------------------------------------------------------------------- #
+# Variable parts of a target (SYM-8)
+# --------------------------------------------------------------------------- #
+
+_ALIAS_DEPTH = 4
+
+
+def target_pattern(node: ast.expr) -> Optional[str]:
+    """``node`` as a path whose variable parts read ``<expr>``, or ``None`` when
+    every part is fixed. Handles ``getattr(obj, "name" | f"...{x}" | name)``,
+    subscripts and local names assigned once before the line (aliases)."""
+    try:
+        text, varies = _pattern(node, _ALIAS_DEPTH)
+    except Exception:  # pragma: no cover - defensive: never break recording
+        return None
+    return text if varies else None
+
+
+def _pattern(node: ast.expr, depth: int) -> tuple[str, bool]:
+    if isinstance(node, ast.Attribute):
+        base, varies = _pattern(node.value, depth)
+        return f"{base}.{node.attr}", varies
+    if isinstance(node, ast.Subscript):
+        base, varies = _pattern(node.value, depth)
+        index = node.slice
+        if isinstance(index, ast.Constant):
+            return f"{base}[{index.value!r}]", varies
+        return f"{base}[<{_unparse(index)}>]", True
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) == 2
+        and not node.keywords
+    ):
+        base, varies = _pattern(node.args[0], depth)
+        name, named_varies = _name_part(node.args[1], depth)
+        return f"{base}.{name}", varies or named_varies
+    if isinstance(node, ast.Name) and depth > 0:
+        alias = _alias_of(node)
+        if alias is not None:
+            return _pattern(alias, depth - 1)
+    return _unparse(node), False
+
+
+def _name_part(node: ast.expr, depth: int) -> tuple[str, bool]:
+    """An attribute name given to getattr: literal text, or ``<expr>`` parts."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value, False
+    if isinstance(node, ast.JoinedStr):
+        out = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                out.append(str(part.value))
+            elif isinstance(part, ast.FormattedValue):
+                out.append(f"<{_unparse(part.value)}>")
+        return "".join(out), True
+    if isinstance(node, ast.Name) and depth > 0:
+        alias = _alias_of(node)
+        if alias is not None:
+            return _name_part(alias, depth - 1)
+    return f"<{_unparse(node)}>", True
+
+
+def _alias_of(name: ast.Name) -> Optional[ast.expr]:
+    """The value of the last ``name = <expr>`` before ``name``'s line in its
+    function (or module), if that is the only kind of binding of ``name``."""
+    scope: Any = name
+    while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+        scope = getattr(scope, "parent", None)
+    if scope is None:
+        return None
+    line = name.lineno
+    best: Optional[ast.Assign] = None
+    for n in _scope_nodes(scope):
+        if (
+            isinstance(n, ast.Assign)
+            and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name)
+            and n.targets[0].id == name.id
+        ):
+            if n.lineno < line and (best is None or n.lineno > best.lineno):
+                best = n
+        elif _rebinds(n, name.id):
+            return None  # bound another way too (loop, with, +=): not a plain alias
+    return None if best is None else best.value
+
+
+def _scope_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Every node of ``scope`` outside nested functions, classes and lambdas."""
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        n = stack.pop()
+        yield n
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(n))
+
+
+def _rebinds(node: ast.AST, name: str) -> bool:
+    """True when ``node`` binds ``name`` other than by a plain assignment."""
+    targets: list[ast.AST] = []
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.AugAssign, ast.NamedExpr)):
+        targets = [node.target]
+    elif isinstance(node, (ast.With, ast.AsyncWith)):
+        targets = [i.optional_vars for i in node.items if i.optional_vars is not None]
+    elif isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    return any(
+        isinstance(t, ast.Name) and t.id == name and isinstance(t.ctx, ast.Store)
+        for target in targets
+        for t in ast.walk(target)
+    )
+
+
+_PLACEHOLDER = re.compile(r"<[^<>]+>")
+
+
+def apply_target_pattern(concrete: str, pattern: str) -> Optional[str]:
+    """The concrete ``target`` with the parts that ``pattern`` marks as variable
+    put back as ``<expr>``: both are aligned segment by segment from the right
+    (the bridge's target often drops a prefix such as ``tb.``). Every aligned
+    segment must match, except the concrete name's first one (the bridge may
+    name the root differently). ``None`` when they do not, or when no
+    segment is variable."""
+    holders: list[str] = []
+
+    def hide(m: "re.Match[str]") -> str:
+        holders.append(m.group())
+        return f"\x00{len(holders) - 1}\x00"
+
+    hidden = _PLACEHOLDER.sub(hide, pattern)
+    sym_parts = hidden.split(".")
+    con_parts = concrete.split(".")
+    out = list(con_parts)
+    changed = False
+    for i in range(1, min(len(sym_parts), len(con_parts)) + 1):
+        sym, con = sym_parts[-i], con_parts[-i]
+        root = i == len(con_parts)  # the bridge may name the root differently
+        if "\x00" not in sym:
+            if sym != con:
+                if root:
+                    break
+                return None
+            continue
+        pieces = re.split(r"\x00(\d+)\x00", sym)
+        regex = "".join(
+            re.escape(p) if k % 2 == 0 else "(.+?)" for k, p in enumerate(pieces)
+        )
+        if not re.fullmatch(regex, con):
+            if root:
+                break
+            return None
+        out[-i] = "".join(p if k % 2 == 0 else holders[int(p)] for k, p in enumerate(pieces))
+        changed = True
+    return ".".join(out) if changed else None
 
 
 # --------------------------------------------------------------------------- #

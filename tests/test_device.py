@@ -144,3 +144,23 @@ def test_unscoped_actions_are_kept(dev, rec):
     with step("Scoped"):
         dev.map.ctrl.enable = 0
     assert len(rec.unscoped) == 1 and len(rec.steps[0].actions) == 1
+
+
+
+
+def test_a_block_picked_by_name_keeps_the_name_symbolic(dev, rec):
+    """SYM-8: a target reached through ``getattr`` with an f-string shows the
+    variable part as ``<expr>``, also through a local alias."""
+    name, value = "ulse", 7
+    with step("Program pulse"):
+        blk = getattr(dev.map, f"p{name}")
+        blk.width = value
+        getattr(dev.map, f"p{name}").period = value
+        blk = dev.map.ctrl  # the latest assignment before the line counts
+        blk.mode = 1
+    assert procedure(rec) == [
+        "1. Program pulse",
+        "   1.1. dev.map.p<name>.width = <value>",
+        "   1.2. dev.map.p<name>.period = <value>",
+        "   1.3. dev.map.ctrl.mode = 1",
+    ]

@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Variable parts of a target stay symbolic: a register reached with
+  `getattr(obj, f"reg{ch}")` or `obj[i]`, directly or through a local alias
+  (`reg = getattr(...)`, then `reg.value = val`), reads `dut.block.reg<ch>.value = <val>`
+  in the procedure, so parametrized runs share one procedure. The bridge's concrete
+  target is matched segment by segment from the right; when it does not match, the
+  target is shown as before.
 - Monospace in step titles: text between backticks is a code span, as in Markdown
   (``step("Write into `dut.reg1 = 1`")``). `stepdoc.fmt.mono(text)` writes a span for
   any text (it picks a fence longer than any backticks inside), so it works in

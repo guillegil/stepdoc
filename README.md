@@ -84,7 +84,11 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 3. **Symbolic values** come from the source: when an action is recorded, stepdoc
    finds the line of your test that caused it and later reads that expression
    with [`executing`](https://github.com/alexmojaki/executing). Literals stay
-   literal, names become `<name>`.
+   literal, names become `<name>`. Targets keep their variable parts too:
+   after `reg = getattr(tb.dut.block, f"reg{ch}")`, `reg.value = val` reads
+   `dut.block.reg<ch>.value = <val>` (also `tb.dut.regs[i]` → `regs[<i>]`), so every
+   parametrized run shares one procedure. This applies to actions recorded with
+   `record_action`; a bare `step("…")` title is plain text.
 4. **Checks** come from plain `assert` (passing ones need
    `enable_assertion_pass_hook = true`), `step("…", check=...)` and
    `stepdoc.attach_check(...)`. stepdoc never compares values itself.
