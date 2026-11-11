@@ -74,14 +74,21 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
    decides the numbering; actions, checks and nested steps share it (1.1, 1.2, 1.2.1).
    A bare `step("…")` call records a one-line step: 1.2 inside a step, a top-level
    step outside one. An event listener in `conftest.py` can call it on every
-   register write, for example.
+   register write, for example. Text between backticks in a title is shown in
+   monospace (`` step("Write into `dut.reg1 = 1`") ``); `stepdoc.fmt.mono(text)`
+   writes that for any text, so it works in f-strings:
+   `step(f"Write into {fmt.mono(reg.path)}")`.
 2. **Actions** come from your system under test's own events through a small
    **bridge** in `conftest.py`, for example an httpx event hook or a device's
    register callbacks. stepdoc ships no drivers.
 3. **Symbolic values** come from the source: when an action is recorded, stepdoc
    finds the line of your test that caused it and later reads that expression
    with [`executing`](https://github.com/alexmojaki/executing). Literals stay
-   literal, names become `<name>`.
+   literal, names become `<name>`. Targets keep their variable parts too:
+   after `reg = getattr(tb.dut.block, f"reg{ch}")`, `reg.value = val` reads
+   `dut.block.reg<ch>.value = <val>` (also `tb.dut.regs[i]` → `regs[<i>]`), so every
+   parametrized run shares one procedure. This applies to actions recorded with
+   `record_action`; a bare `step("…")` title is plain text.
 4. **Checks** come from plain `assert` (passing ones need
    `enable_assertion_pass_hook = true`), `step("…", check=...)` and
    `stepdoc.attach_check(...)`. stepdoc never compares values itself.

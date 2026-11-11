@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
 
-from .symbolic import Resolution, Site
+from .symbolic import Resolution, Site, apply_target_pattern
 
 Status = Literal["passed", "failed", "error", "not_run", "unknown"]
 Direction = Literal["in", "out", "exchange"]
@@ -104,6 +104,8 @@ class Action:
             self.symbolic_target = self.target_template.format(**parts)
         else:
             self.symbolic_target = self.target
+            if res.target_pattern is not None:
+                self.symbolic_target = apply_target_pattern(self.target, res.target_pattern) or self.target
 
 
 @dataclass

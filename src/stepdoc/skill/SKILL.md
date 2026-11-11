@@ -78,6 +78,9 @@ database, CLI and device recipes and every `record_action` argument.
 - Plain `assert` works. Passing asserts are recorded only with
   `enable_assertion_pass_hook = true` in the pytest ini.
 - `step("Output in range", check=vout < 3.3)` records a one-line step.
+- Backticks in a title mark monospace, as in Markdown: `step("Write into `dut.reg1 = 1`")`.
+  In f-strings use `fmt.mono` (`from stepdoc import fmt`), which picks a safe fence:
+  `step(f"Write into {fmt.mono(reg.path)}")`. HTML outputs show these spans as code.
 - A bare `step("dut.reg1 = 45")` statement records a one-line step without a check:
   `1.2` inside an open step, a top-level step outside one. Event listeners can log
   with it. `s = step("…")` kept for a later `with s:` records nothing by itself.
@@ -110,6 +113,8 @@ The file extension picks the format: `.md`, `.html` or `.txt`.
 
 - every step has a clear title and at least one action or check;
 - parameters show as `<name>`, not as one run's literal values;
+- a register picked by a variable (`getattr(blk, f"reg{ch}")`, `regs[i]`) shows
+  as `reg<ch>` / `regs[<i>]`, through one local alias at most a few hops deep;
 - no line says "value from this run" (the source was not found: check
   `stepdoc_skip_modules` or the bridge's `value_from`);
 - nothing important is in "Unscoped";

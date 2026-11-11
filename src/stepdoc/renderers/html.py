@@ -6,6 +6,7 @@ from __future__ import annotations
 from html import escape
 from typing import Optional
 
+from ..core.fmt import spans
 from .common import (
     OUTCOME_TEXT,
     STATUS_MARK,
@@ -103,6 +104,11 @@ def _code(text: str) -> str:
     return f"<code>{escape(text)}</code>" if text else ""
 
 
+def _title(text: str) -> str:
+    """A step title, its `code` spans (FMT-1) as <code>."""
+    return "".join(_code(t) if code else escape(t) for t, code in spans(text))
+
+
 def _line(line: Line) -> str:
     pad = f' style="margin-left:{line.depth * 1.5}em"' if line.depth else ""
     if line.is_step and line.number is None:
@@ -110,7 +116,7 @@ def _line(line: Line) -> str:
     cls = "line step" if line.is_step else "line"
     num = f'<span class="num">{escape(line.number)}</span>' if line.number else '<span class="num">·</span>'
     if line.is_step:
-        body = escape(line.code)
+        body = _title(line.code)
     else:
         body = " ".join(p for p in (escape(line.verb), _code(line.code)) if p)
         if line.result:
