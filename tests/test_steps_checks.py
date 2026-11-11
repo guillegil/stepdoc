@@ -52,6 +52,57 @@ def test_leaf_step_forms():
             pass
 
 
+def test_bare_step_records_a_one_line_step():
+    """STEP-9: a bare ``step("title")`` statement records a step: X.Y inside an
+    open step, top-level outside one. Event listeners log with it."""
+
+    def listener(text):
+        step(text)
+
+    with Recorder() as rec:
+        with step("Configure"):
+            listener("dut.reg1 = 45")
+            step("dut.reg2 = 46")
+        step("dut.reg3 = 7")
+    configure, outside = rec.steps
+    assert [(c.number, c.title) for c in configure.children] == [
+        ("1.1", "dut.reg1 = 45"),
+        ("1.2", "dut.reg2 = 46"),
+    ]
+    assert (outside.number, outside.title, outside.status) == ("2", "dut.reg3 = 7", "passed")
+    assert outside.location.file.endswith("test_steps_checks.py")
+    assert outside.entries == [] and outside.ended is not None
+
+
+def test_step_kept_for_later_is_not_recorded():
+    with Recorder() as rec:
+        later = step("Later")
+        decorate = step("Helper")
+
+        @decorate
+        def helper():
+            pass
+
+        with later:
+            helper()
+        with step("Plain"):
+            pass
+    assert [(s.number, s.title) for s in rec.steps] == [("1", "Later"), ("2", "Plain")]
+    assert [c.title for c in rec.steps[0].children] == ["Helper"]
+
+
+def test_bare_step_notifies_listeners():
+    events = []
+    with Recorder() as rec:
+        rec.listeners.append(lambda event, s: events.append((event, s.number)))
+        step("Note")
+    assert events == [("started", "1"), ("finished", "1")]
+
+
+def test_bare_step_outside_a_recorder_does_nothing():
+    step("Nobody records this")
+
+
 def test_unknown_check_type_names_the_tool():
     class Foreign:
         pass
