@@ -1,5 +1,6 @@
 """stepdoc core: pure Python, must never import pytest (NFR-2, NFR-9)."""
 
+from . import fmt
 from .model import Action, Check, Location, Step
 from .record import case_record, dumps, load, run_record, to_dict
 from .recorder import (
@@ -30,6 +31,7 @@ __all__ = [
     "current_recorder",
     "current_step",
     "dumps",
+    "fmt",
     "is_dry_run",
     "load",
     "look_through",

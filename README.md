@@ -74,7 +74,10 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
    decides the numbering; actions, checks and nested steps share it (1.1, 1.2, 1.2.1).
    A bare `step("…")` call records a one-line step: 1.2 inside a step, a top-level
    step outside one. An event listener in `conftest.py` can call it on every
-   register write, for example.
+   register write, for example. Text between backticks in a title is shown in
+   monospace (`` step("Write into `dut.reg1 = 1`") ``); `stepdoc.fmt.mono(text)`
+   writes that for any text, so it works in f-strings:
+   `step(f"Write into {fmt.mono(reg.path)}")`.
 2. **Actions** come from your system under test's own events through a small
    **bridge** in `conftest.py`, for example an httpx event hook or a device's
    register callbacks. stepdoc ships no drivers.

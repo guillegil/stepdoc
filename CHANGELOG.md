@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Monospace in step titles: text between backticks is a code span, as in Markdown
+  (``step("Write into `dut.reg1 = 1`")``). `stepdoc.fmt.mono(text)` writes a span for
+  any text (it picks a fence longer than any backticks inside), so it works in
+  f-strings, and `stepdoc.fmt.spans(title)` splits a title for renderers. The HTML
+  outputs show the spans as `<code>`; Markdown and text keep the title as written.
+  Titles stay plain strings in the run record.
 - A bare `step("title")` statement records a one-line step with no check: `1.2`
   inside an open step, a top-level step outside one. Event listeners (a register
   tracer's subscriber, for example) can log what happened as steps, as
