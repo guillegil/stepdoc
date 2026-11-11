@@ -32,6 +32,9 @@ procedure reads `== <age>` instead of one run's number. If the procedure shows
 `step(title, check=value)` records a one-line step holding one check. It is not a
 context manager and cannot decorate a function.
 
+A bare `step(title)` statement, without `check=`, records a one-line step with no
+check (passed unless in dry-run).
+
 ## Not judged
 
 `Check(text, passed=None)` is recorded as documentation only and never turns a

@@ -78,6 +78,9 @@ database, CLI and device recipes and every `record_action` argument.
 - Plain `assert` works. Passing asserts are recorded only with
   `enable_assertion_pass_hook = true` in the pytest ini.
 - `step("Output in range", check=vout < 3.3)` records a one-line step.
+- A bare `step("dut.reg1 = 45")` statement records a one-line step without a check:
+  `1.2` inside an open step, a top-level step outside one. Event listeners can log
+  with it. `s = step("…")` kept for a later `with s:` records nothing by itself.
 - `stepdoc.attach_check(check, text)` adds a check to the current step.
 - `check=` accepts a `bool`, a callable returning `bool`, a `stepdoc.Check`, or an
   object a registered converter understands. Anything else raises `CheckTypeError`.

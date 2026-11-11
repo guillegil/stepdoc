@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dis
 import functools
 import os
+import sys
 import time
 from contextvars import ContextVar
 from types import TracebackType
@@ -409,7 +411,8 @@ _NO_CHECK = object()
 
 
 class step:  # noqa: N801 - public API name from the brief
-    """``with step("title"):`` · ``@step("title")`` · ``step("title", check=...)``.
+    """``with step("title"):`` · ``@step("title")`` · ``step("title", check=...)``
+    · ``step("title")``.
 
     Nesting in the code decides the numbering (STEP-1). Exceptions are attached
     to the step and re-raised (STEP-5); in dry-run, assertion failures inside a
@@ -418,6 +421,10 @@ class step:  # noqa: N801 - public API name from the brief
     ``record=False`` (STEP-7) keeps the step but drops the actions recorded inside
     it, including in nested steps: a helper then reads as one line. Checks and
     nested steps are still recorded.
+
+    A bare ``step("title")`` call, a statement on its own, records a one-line step
+    with no check (STEP-9): ``1.2`` inside an open step, a top-level step outside
+    one. Event listeners use it to log what the system under test did.
     """
 
     def __init__(self, title: str, *, check: Any = _NO_CHECK, record: bool = True) -> None:
@@ -432,6 +439,10 @@ class step:  # noqa: N801 - public API name from the brief
             if rec is not None:
                 c.location = _caller_location()
                 rec.add_leaf(title, c, c.location)
+        elif _is_statement(sys._getframe(1)):
+            rec = _current.get()
+            if rec is not None:
+                rec._close(rec._open(title, _caller_location()), None)
 
     def __enter__(self) -> Optional[Step]:
         if self._leaf:
@@ -466,6 +477,30 @@ class step:  # noqa: N801 - public API name from the brief
                 return fn(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]
+
+
+# (code, offset of the call) -> whether its result is discarded (STEP-9).
+_STATEMENT_CALLS: dict[tuple[Any, int], bool] = {}
+_DISCARD = frozenset({"POP_TOP"})
+
+
+def _is_statement(frame: Any) -> bool:  # noqa: ANN401
+    """True when the call running in ``frame`` is an expression statement: its
+    result is dropped, so it is neither ``with step(...)`` nor ``@step(...)``."""
+    code, offset = frame.f_code, frame.f_lasti
+    key = (code, offset)
+    found = _STATEMENT_CALLS.get(key)
+    if found is None:
+        found = False
+        after = False
+        for ins in dis.get_instructions(code):
+            if after:
+                found = ins.opname in _DISCARD
+                break
+            if ins.offset == offset:
+                after = True
+        _STATEMENT_CALLS[key] = found
+    return found
 
 
 def _caller_location() -> Optional[Location]:

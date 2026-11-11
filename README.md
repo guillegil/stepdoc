@@ -72,6 +72,9 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 
 1. **Steps** come from `with step("…")` blocks (or `@step("…")` on helpers). Nesting
    decides the numbering; actions, checks and nested steps share it (1.1, 1.2, 1.2.1).
+   A bare `step("…")` call records a one-line step: 1.2 inside a step, a top-level
+   step outside one. An event listener in `conftest.py` can call it on every
+   register write, for example.
 2. **Actions** come from your system under test's own events through a small
    **bridge** in `conftest.py`, for example an httpx event hook or a device's
    register callbacks. stepdoc ships no drivers.

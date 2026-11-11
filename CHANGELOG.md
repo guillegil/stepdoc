@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- A bare `step("title")` statement records a one-line step with no check: `1.2`
+  inside an open step, a top-level step outside one. Event listeners (a register
+  tracer's subscriber, for example) can log what happened as steps, as
+  pytest-reporter's old `step()`/`substep()` did. `with step(...)`, `@step(...)`
+  and `step(..., check=...)` are unchanged, and a `step(...)` kept in a variable
+  for a later `with` records nothing by itself.
+
 ### Changed
 - Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
 
