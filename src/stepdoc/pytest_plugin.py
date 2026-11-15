@@ -62,7 +62,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                   help="module prefixes skipped when looking for the user's source line "
                        "(drivers, clients, bridges' libraries)")
     parser.addini("stepdoc_collapse_repeats", type="bool", default=True,
-                  help="collapse repeated reads or calls from one source line (polling) into one line")
+                  help="collapse polling, repeated writes and loop passes into one entry")
     parser.addini("stepdoc_adapters", type="linelist", default=[],
                   help="adapters to run (default: every adapter whose tool is installed); "
                        "'-name' leaves one out, 'none' runs none")

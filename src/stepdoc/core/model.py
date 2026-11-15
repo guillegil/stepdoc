@@ -133,7 +133,38 @@ class Check:
     expected value came from a name (``'Stored age' == <age>``)."""
 
 
-Entry = Union[Action, Check, "Step"]
+@dataclass
+class Repeat:
+    """Passes of a loop that did the same thing each time (ACT-10).
+
+    Recorded automatically when a group of actions repeats back to back (a ``for``
+    or ``while`` loop), or by ``with stepdoc.repeat(until=...)``. ``entries`` is one
+    pass, with the values of the last one; ``count`` is how many passes it stands
+    for. A pass that did something else is not counted: it follows as ordinary
+    entries, so a failure inside the loop stays visible.
+    """
+
+    entries: list["Entry"]
+    count: Optional[int]
+    """Passes, or ``None`` when a ``repeat()`` block's passes could not be told apart
+    (they differed, or the body did more than collapses on its own)."""
+    t: float
+    t_last: Optional[float] = None
+    """Time of the last action of the last pass."""
+    until: Optional[str] = None
+    """Exit condition in words, from ``stepdoc.repeat(until=...)``."""
+    number: Optional[str] = None
+    section: Optional[Section] = None
+    """Set on unscoped repeats only, like ``Action.section``."""
+    partial: Optional[list[Any]] = field(default=None, repr=False, compare=False)
+    """The pass in progress while the loop runs; ``None`` once the repeat is closed."""
+
+    @property
+    def location(self) -> Optional[Location]:
+        return self.entries[0].location if self.entries else None
+
+
+Entry = Union[Action, Check, Repeat, "Step"]
 
 
 @dataclass
@@ -160,7 +191,18 @@ class Step:
 
     @property
     def children(self) -> list["Step"]:
-        return [e for e in self.entries if isinstance(e, Step)]
+        """Child steps, also those inside a ``repeat()`` block."""
+        return _steps_in(self.entries)
+
+
+def _steps_in(entries: list[Entry]) -> list[Step]:
+    out: list[Step] = []
+    for e in entries:
+        if isinstance(e, Step):
+            out.append(e)
+        elif isinstance(e, Repeat):
+            out.extend(_steps_in(e.entries))
+    return out
 
 
 _RANK = {"passed": 0, "not_run": 0, "unknown": 1, "failed": 2, "error": 3}

@@ -32,10 +32,16 @@ def test_polling_collapses_into_one_entry(dev, rec):
     assert first["value"]["concrete"] is True
 
 
-def test_writes_never_collapse(dev, rec):
+def test_identical_writes_collapse_but_different_values_do_not(dev, rec):
     for _ in range(3):
         dev.map.ctrl.enable = 1
-    assert [a.count for a in rec.unscoped] == [1, 1, 1]
+    for level in (1, 2):
+        dev.map.dac.level = level
+    assert [(a.target, a.count) for a in rec.unscoped] == [
+        ("dev.map.ctrl.enable", 3),
+        ("dev.map.dac.level", 1),
+        ("dev.map.dac.level", 1),
+    ]
 
 
 def test_repeated_requests_collapse_when_identical(api, rec):

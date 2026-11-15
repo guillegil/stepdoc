@@ -118,7 +118,8 @@ The file extension picks the format: `.md`, `.html` or `.txt`.
 - no line says "value from this run" (the source was not found: check
   `stepdoc_skip_modules` or the bridge's `value_from`);
 - nothing important is in "Unscoped";
-- polling shows as one "Poll …" line, not dozens of reads.
+- polling shows as one "Poll …" line, and a loop as one "Repeat" entry, not
+  dozens of lines.
 
 See [references/review.md](references/review.md) for common mistakes and fixes,
 and [references/dry-run.md](references/dry-run.md) for running without the real

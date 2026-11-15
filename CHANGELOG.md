@@ -22,7 +22,22 @@
   and `step(..., check=...)` are unchanged, and a `step(...)` kept in a variable
   for a later `with` records nothing by itself.
 
+- Loops collapse: when the same group of actions (up to 8) comes back to back, as
+  the body of a `for` or `while` loop does, the passes become one `Repeat` entry
+  holding one pass, with the number of passes in the report (`Repeat   16 times, 3 ms`).
+  Passing checks made in every pass are part of it; a pass that differs (a failed
+  check, another value) ends the loop and is shown as it ran.
+- `with stepdoc.repeat(until="FIFO is empty"):` around a loop names it
+  (`Repeat until FIFO is empty`), takes the loop's last test of its condition into
+  the entry, and keeps actions before and after the block out of the loop.
+- Run record schema 0.4: `repeat` entries (`until`, `count`, `t`, `t_last`,
+  `entries`). Records written with 0.1 to 0.3 still render.
+
 ### Changed
+- The same write repeated from one source line, with the same value, collapses
+  into one line, like polling: `Repeat dev.fifo.fifo_data = <cmd>`, and in the
+  report `(16 times, 2 ms)`. Writes used to stay one line each.
+  `stepdoc_collapse_repeats = false` keeps every write.
 - Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
 
 ## 0.2.0
