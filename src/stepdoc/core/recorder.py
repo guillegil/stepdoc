@@ -208,14 +208,21 @@ class Recorder:
                     del entries[len(entries) - len(e.reads) :]
                 self._add_to(s, e)
 
-    def _close_repeat(self, s: Optional[Step], start: int, until: Optional[str], clean: bool) -> None:
+    def _close_repeat(
+        self,
+        s: Optional[Step],
+        start: int,
+        until: Optional[str],
+        clean: bool,
+        title: Optional[str] = None,
+    ) -> None:
         """End of a ``repeat()`` block whose entries start at ``start``."""
         self._flush(s)
         entries = self._container(s)
         region = entries[start:]
         rest: list[Any] = []
         if not region:
-            rep = Repeat(entries=[], count=0, t=_perf(), until=until)
+            rep = Repeat(entries=[], count=0, t=_perf(), until=until, title=title)
         else:
             head, rest = region[0], region[1:]
             if isinstance(head, Repeat) and head.until is None:
@@ -226,6 +233,7 @@ class Recorder:
             else:
                 rep, rest = Repeat(entries=region, count=None, t=_entry_time(head)), []
             rep.until = until
+            rep.title = title
             if clean and rep.count is not None and _is_prefix(rest, rep.entries):
                 # The last test of a ``while`` condition: part of the loop, not a pass.
                 for a, b in zip(rep.entries, rest):
@@ -678,18 +686,19 @@ class step:  # noqa: N801 - public API name from the brief
 
 
 class repeat:  # noqa: N801 - reads like ``step``
-    """``with repeat(until="FIFO is empty"):`` around a loop (ACT-10).
+    """``with repeat("Drain the FIFO", until="FIFO is empty"):`` around a loop (ACT-10).
 
     Loops collapse on their own: when the same actions come back to back, the
     passes become one ``Repeat`` entry with a count. This block only says what the
-    loop waits for, and keeps the actions recorded before and after it out of the
-    loop. It records one entry, ``Repeat until FIFO is empty``, whose children are
-    one pass. The last test of a ``while`` condition (a pass cut short where the
+    loop does and what it waits for (both optional), and keeps the actions recorded
+    before and after it out of the loop. It records one entry, ``Drain the FIFO
+    (repeat until FIFO is empty)``, whose children are one pass. The last test of a ``while`` condition (a pass cut short where the
     loop ended) is part of the entry; a pass that differs, such as the one where
     an exception was raised, follows it as ordinary entries.
     """
 
-    def __init__(self, until: Optional[str] = None) -> None:
+    def __init__(self, title: Optional[str] = None, *, until: Optional[str] = None) -> None:
+        self.title = title
         self.until = until
         self._rec: Optional[Recorder] = None
         self._step: Optional[Step] = None
@@ -723,7 +732,7 @@ class repeat:  # noqa: N801 - reads like ``step``
             rec._floors.pop(id(entries), None)
         else:
             rec._floors[id(entries)] = self._saved
-        rec._close_repeat(self._step, self._start, self.until, clean=exc is None)
+        rec._close_repeat(self._step, self._start, self.until, clean=exc is None, title=self.title)
 
 
 # (code, offset of the call) -> whether its result is discarded (STEP-9).

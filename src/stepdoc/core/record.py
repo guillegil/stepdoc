@@ -142,6 +142,7 @@ def _repeat(r: Repeat, ctx: _Ctx) -> dict[str, Any]:
         "type": "repeat",
         "number": r.number,
         "until": r.until,
+        **({} if r.title is None else {"title": r.title}),
         "count": r.count,
         "t": ctx.t(r.t),
         "t_last": ctx.t(r.t_last),

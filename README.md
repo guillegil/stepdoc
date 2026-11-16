@@ -116,10 +116,13 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 
   Passing checks made in every pass are part of it. A pass that does something
   else (a failed check, another value written) ends the loop and is shown as it
-  ran, after it. Wrap the loop in `with stepdoc.repeat(until="FIFO is empty"):` to
-  say what it waits for: the entry reads `Repeat until FIFO is empty`, the last
+  ran, after it. Wrap the loop in
+  `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` to say what it
+  does and what it waits for (both optional): the entry reads
+  `Drain the FIFO (repeat until FIFO is empty)` (`Repeat until FIFO is empty`
+  without the description, `Drain the FIFO (repeat)` without `until`), the last
   test of the condition belongs to it, and actions before and after the block
-  never join the loop. The title is always written by hand: stepdoc does not turn
+  never join the loop. Both texts are written by hand: stepdoc does not turn
   `while not fifo_empty` into words.
   Turn all of this off with `stepdoc_collapse_repeats = false`.
 - **Reads inside checks.** A read on the same line as an `assert` is shown on the

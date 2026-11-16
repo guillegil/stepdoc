@@ -1,4 +1,4 @@
-"""ACT-10: loops collapse into one Repeat entry; stepdoc.repeat(until=...) names them."""
+"""ACT-10: loops collapse into one Repeat entry; stepdoc.repeat(title, until=...) names them."""
 
 import json
 import sys
@@ -295,3 +295,33 @@ def test_fifo_loops_through_the_plugin(pytester):
     assert [e["type"] for e in first] == ["repeat"] and first[0]["count"] == 16
     assert [e["type"] for e in second] == ["repeat"] and second[0]["count"] == 16
     assert "Repeat until FIFO is empty" in (pytester.path / "out/report.html").read_text()
+
+
+def test_repeat_block_with_a_title(dev, rec):
+    with step("Empty FIFO"):
+        with repeat("Drain the FIFO", until="FIFO is empty"):
+            drain(dev)
+        with repeat("Read back", until="done"):
+            pass
+        with repeat("Pulse enable"):
+            for _ in range(3):
+                dev.map.ctrl.enable = 1
+    assert [line for line in procedure(rec) if "repeat" in line] == [
+        "   1.1. Drain the FIFO (repeat until FIFO is empty)",
+        "   1.2. Read back (repeat until done)",
+        "   1.3. Pulse enable (repeat)",
+    ]
+    lines = report(rec).splitlines()
+    assert any(line.startswith("   1.1. Drain the FIFO (repeat until FIFO is empty)   2 times") for line in lines)
+    assert "   1.3. Pulse enable (repeat)   3 times, " in report(rec)
+    record = case_record(rec)
+    first, _, third = record["steps"][0]["entries"]
+    assert first["title"] == "Drain the FIFO" and first["until"] == "FIFO is empty"
+    assert third["title"] == "Pulse enable" and third["until"] is None
+    jsonschema.validate({"schema_version": "0.4", "generator": {"name": "stepdoc", "version": "x",
+                         "python": "3"}, "created_at": "", "dry_run": False, "tests": [record]}, SCHEMA)
+
+
+def test_until_is_keyword_only():
+    with pytest.raises(TypeError):
+        repeat("Drain the FIFO", "FIFO is empty")

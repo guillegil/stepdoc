@@ -102,6 +102,7 @@
         "type": {"const": "repeat"},
         "number": {"type": ["string", "null"], "description": "null for unscoped repeats"},
         "until": {"type": ["string", "null"], "description": "Exit condition in words, from stepdoc.repeat(until=...)"},
+        "title": {"type": "string", "description": "What the loop does, from stepdoc.repeat(\"Drain the FIFO\")"},
         "count": {"type": ["integer", "null"], "minimum": 0, "description": "Passes; null when a repeat() block's passes could not be told apart"},
         "t": {"type": "number"},
         "t_last": {"type": ["number", "null"], "description": "Time of the last action of the last pass"},

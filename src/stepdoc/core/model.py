@@ -153,6 +153,8 @@ class Repeat:
     """Time of the last action of the last pass."""
     until: Optional[str] = None
     """Exit condition in words, from ``stepdoc.repeat(until=...)``."""
+    title: Optional[str] = None
+    """What the loop does, from ``stepdoc.repeat("Drain the FIFO")``."""
     number: Optional[str] = None
     section: Optional[Section] = None
     """Set on unscoped repeats only, like ``Action.section``."""

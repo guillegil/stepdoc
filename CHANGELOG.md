@@ -27,11 +27,12 @@
   holding one pass, with the number of passes in the report (`Repeat   16 times, 3 ms`).
   Passing checks made in every pass are part of it; a pass that differs (a failed
   check, another value) ends the loop and is shown as it ran.
-- `with stepdoc.repeat(until="FIFO is empty"):` around a loop names it
-  (`Repeat until FIFO is empty`), takes the loop's last test of its condition into
-  the entry, and keeps actions before and after the block out of the loop.
-- Run record schema 0.4: `repeat` entries (`until`, `count`, `t`, `t_last`,
-  `entries`). Records written with 0.1 to 0.3 still render.
+- `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` around a loop
+  names it (`Drain the FIFO (repeat until FIFO is empty)`; both texts are
+  optional, `until` is keyword-only), takes the loop's last test of its condition
+  into the entry, and keeps actions before and after the block out of the loop.
+- Run record schema 0.4: `repeat` entries (`until`, `title`, `count`, `t`,
+  `t_last`, `entries`). Records written with 0.1 to 0.3 still render.
 
 ### Changed
 - The same write repeated from one source line, with the same value, collapses

@@ -108,8 +108,11 @@ def _times(result: Optional[str], count: int, noun: str, e: Record) -> str:
 
 
 def repeat_line(r: Record, symbolic: bool, depth: int) -> Line:
-    """ACT-10: ``Repeat until FIFO is empty``; the report adds how often."""
+    """ACT-10: ``Drain the FIFO (repeat until FIFO is empty)``; the report adds how
+    often."""
     verb = f"Repeat until {r['until']}" if r.get("until") else "Repeat"
+    if r.get("title"):
+        verb = f"{r['title']} ({verb[0].lower()}{verb[1:]})"
     note = None
     count = r.get("count")
     if not symbolic and count is not None:

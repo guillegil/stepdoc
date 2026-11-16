@@ -131,5 +131,5 @@ Repeated reads of the same target from one source line collapse into one
 `Poll …` line with a count and duration; the same write repeated with the same
 value becomes one `Repeat …` line. When a group of up to 8 actions repeats back
 to back (a loop body), the passes become one `Repeat` entry holding one pass.
-Wrap a loop in `with stepdoc.repeat(until="FIFO is empty"):` to name what it waits
-for. Turn all of it off with `stepdoc_collapse_repeats = false`.
+Wrap a loop in `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` to
+say what it does and what it waits for (both optional; `until` is keyword-only). Turn all of it off with `stepdoc_collapse_repeats = false`.
