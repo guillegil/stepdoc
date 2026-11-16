@@ -116,15 +116,37 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 
   Passing checks made in every pass are part of it. A pass that does something
   else (a failed check, another value written) ends the loop and is shown as it
-  ran, after it. Wrap the loop in
-  `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` to say what it
-  does and what it waits for (both optional): the entry reads
-  `Drain the FIFO (repeat until FIFO is empty)` (`Repeat until FIFO is empty`
-  without the description, `Drain the FIFO (repeat)` without `until`), the last
-  test of the condition belongs to it, and actions before and after the block
-  never join the loop. Both texts are written by hand: stepdoc does not turn
-  `while not fifo_empty` into words.
+  ran, after it. Wrap the loop in `stepdoc.repeat(...)` to say what it does and
+  what it waits for. With a title the block is a step of its own, at the top
+  level or inside another step:
+
+  ```python
+  with repeat("Fill the CMD FIFO", until="esmi<channel>_ctl.tx = 1",
+              counter="write_count", note="The FIFO holds 512 words; 12 are reserved."):
+      write_count = 0
+      while esmi_ctl_reg.tx == 0:
+          esm_dev.da_read(0x10, timeout=0)
+          write_count += 1
+  ```
+
+  ```text
+  2. Fill the CMD FIFO (repeat until esmi<channel>_ctl.tx = 1, counting write_count)
+     Note: The FIFO holds 512 words; 12 are reserved.
+     2.1. Read esmi_ctl_reg.tx
+     2.2. esm_dev.da_read(0x10, ...)
+  ```
+
+  The report adds the outcome and how often to line 2 (`✓ 500 times · 40 ms`).
+  Without a title it stays an entry of the step it is in
+  (`1.2. Repeat until FIFO is empty`). `until`, `counter` (the variable that counts
+  the passes), `inc` (how much it grows each pass: `write_count +4 each pass`) and
+  `note` are optional and keyword-only. The last test of the condition belongs to
+  the loop, and actions before and after the block never join it. The texts are
+  written by hand: stepdoc does not turn `while not fifo_empty` into words.
   Turn all of this off with `stepdoc_collapse_repeats = false`.
+- **Notes.** `step("Calibrate", note="Offsets drift after power-up.")` (and
+  `repeat(..., note=...)`) puts a sentence for the reader under the step's line,
+  in the procedure and the report. A triple-quoted note is dedented.
 - **Reads inside checks.** A read on the same line as an `assert` is shown on the
   check's line: `Verify dev.map.adc.value == 1024 -> got 1024`.
 - **Quiet helpers.** `@step("Reset device", record=False)` keeps the step and its

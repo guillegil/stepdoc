@@ -80,6 +80,20 @@
         "type": {"const": "step"},
         "number": {"type": "string", "description": "1, 1.2, 1.2.3; setup steps S1, S1.1; teardown steps T1"},
         "title": {"type": "string"},
+        "note": {"type": "string", "description": "From step(..., note=...): why, or what the reader should know"},
+        "loop": {
+          "type": "object",
+          "description": "A step made by a titled stepdoc.repeat(): its entries are one pass (ACT-10)",
+          "required": ["until", "count", "t_last"],
+          "additionalProperties": false,
+          "properties": {
+            "until": {"type": ["string", "null"]},
+            "counter": {"type": "string", "description": "From repeat(..., counter=...): the variable that counts the passes"},
+            "inc": {"type": "number", "description": "From repeat(..., inc=...): how much the counter grows each pass"},
+            "count": {"type": ["integer", "null"]},
+            "t_last": {"type": ["number", "null"]}
+          }
+        },
         "section": {"enum": ["setup", "procedure", "teardown"]},
         "status": {"$ref": "#/$defs/status"},
         "started": {"type": "number"},
@@ -102,7 +116,9 @@
         "type": {"const": "repeat"},
         "number": {"type": ["string", "null"], "description": "null for unscoped repeats"},
         "until": {"type": ["string", "null"], "description": "Exit condition in words, from stepdoc.repeat(until=...)"},
-        "title": {"type": "string", "description": "What the loop does, from stepdoc.repeat(\"Drain the FIFO\")"},
+        "note": {"type": "string", "description": "From stepdoc.repeat(..., note=...): why, or what the reader should know"},
+        "counter": {"type": "string", "description": "From repeat(..., counter=...): the variable that counts the passes"},
+        "inc": {"type": "number", "description": "From repeat(..., inc=...): how much the counter grows each pass"},
         "count": {"type": ["integer", "null"], "minimum": 0, "description": "Passes; null when a repeat() block's passes could not be told apart"},
         "t": {"type": "number"},
         "t_last": {"type": ["number", "null"], "description": "Time of the last action of the last pass"},

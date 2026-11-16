@@ -153,8 +153,12 @@ class Repeat:
     """Time of the last action of the last pass."""
     until: Optional[str] = None
     """Exit condition in words, from ``stepdoc.repeat(until=...)``."""
-    title: Optional[str] = None
-    """What the loop does, from ``stepdoc.repeat("Drain the FIFO")``."""
+    note: Optional[str] = None
+    """Why, or anything the reader should know, from ``repeat(..., note=...)``."""
+    counter: Optional[str] = None
+    """The test's variable that counts the passes, from ``repeat(..., counter=...)``."""
+    inc: Union[int, float, None] = None
+    """How much ``counter`` grows each pass, from ``repeat(..., inc=...)``."""
     number: Optional[str] = None
     section: Optional[Section] = None
     """Set on unscoped repeats only, like ``Action.section``."""
@@ -164,6 +168,20 @@ class Repeat:
     @property
     def location(self) -> Optional[Location]:
         return self.entries[0].location if self.entries else None
+
+
+@dataclass
+class Loop:
+    """What makes a step a loop: a ``repeat()`` block with a title (ACT-10). The
+    step's entries are one pass, as in a ``Repeat``."""
+
+    count: Optional[int]
+    """Passes, or ``None`` when they could not be told apart."""
+    until: Optional[str] = None
+    counter: Optional[str] = None
+    inc: Union[int, float, None] = None
+    t_last: Optional[float] = None
+    """Time of the last action of the last pass."""
 
 
 Entry = Union[Action, Check, Repeat, "Step"]
@@ -182,6 +200,10 @@ class Step:
     (1.1, 1.2, 1.2.1)."""
     error: Optional[str] = None
     location: Optional[Location] = None
+    note: Optional[str] = None
+    """Why, or anything the reader should know, from ``step(..., note=...)``."""
+    loop: Optional[Loop] = None
+    """Set when the step is a titled ``repeat()`` block: its entries are one pass."""
 
     @property
     def actions(self) -> list[Action]:

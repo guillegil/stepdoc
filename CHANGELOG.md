@@ -28,11 +28,21 @@
   Passing checks made in every pass are part of it; a pass that differs (a failed
   check, another value) ends the loop and is shown as it ran.
 - `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` around a loop
-  names it (`Drain the FIFO (repeat until FIFO is empty)`; both texts are
-  optional, `until` is keyword-only), takes the loop's last test of its condition
-  into the entry, and keeps actions before and after the block out of the loop.
-- Run record schema 0.4: `repeat` entries (`until`, `title`, `count`, `t`,
-  `t_last`, `entries`). Records written with 0.1 to 0.3 still render.
+  says what it does and what it waits for, takes the loop's last test of its
+  condition into the loop, and keeps actions before and after the block out of it.
+  With a title the block is a step, at the top level or inside another step
+  (`2. Drain the FIFO (repeat until FIFO is empty)`, its entries one pass, the
+  report adding `✓ 16 times`); without one it is a `Repeat until …` entry.
+  `counter="write_count"` names the variable that counts the passes
+  (`…, counting write_count`) and `inc=4` how much it grows each pass
+  (`write_count +4 each pass`). Everything after the title is keyword-only.
+- `note=` on `step(...)` and `repeat(...)`: a sentence for the reader, shown under
+  the line in the procedure and the report (Markdown as a quote, HTML in italics).
+  Triple-quoted notes are dedented; a blank note is dropped.
+- Run record schema 0.4: `repeat` entries (`until`, `count`, `t`, `t_last`,
+  `entries`, optional `counter`, `inc`, `note`); steps get optional `note` and
+  `loop` (`until`, `count`, `t_last`, optional `counter`, `inc`). Records written
+  with 0.1 to 0.3 still render.
 
 ### Changed
 - The same write repeated from one source line, with the same value, collapses

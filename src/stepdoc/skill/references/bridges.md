@@ -132,4 +132,10 @@ Repeated reads of the same target from one source line collapse into one
 value becomes one `Repeat …` line. When a group of up to 8 actions repeats back
 to back (a loop body), the passes become one `Repeat` entry holding one pass.
 Wrap a loop in `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` to
-say what it does and what it waits for (both optional; `until` is keyword-only). Turn all of it off with `stepdoc_collapse_repeats = false`.
+say what it does and what it waits for. With a title the block is a step of its
+own (top level or nested): `2. Drain the FIFO (repeat until FIFO is empty)`, its
+entries one pass; without one it is a `Repeat until …` entry of the current step.
+Optional keyword arguments: `until`, `counter="write_count"` (the variable that
+counts the passes: `…, counting write_count`), `inc=4` (how much it grows each
+pass, needs `counter`: `write_count +4 each pass`) and `note="…"` (a sentence
+under the line). Turn all of it off with `stepdoc_collapse_repeats = false`.

@@ -312,12 +312,15 @@ def test_repeat_block_with_a_title(dev, rec):
         "   1.3. Pulse enable (repeat)",
     ]
     lines = report(rec).splitlines()
-    assert any(line.startswith("   1.1. Drain the FIFO (repeat until FIFO is empty)   2 times") for line in lines)
-    assert "   1.3. Pulse enable (repeat)   3 times, " in report(rec)
+    # A titled block is a step: status mark, then how often.
+    assert any(line.startswith("   1.1. Drain the FIFO (repeat until FIFO is empty)   ✓ 2 times") for line in lines)
+    assert "   1.3. Pulse enable (repeat)   ✓ 3 times" in report(rec)
     record = case_record(rec)
-    first, _, third = record["steps"][0]["entries"]
-    assert first["title"] == "Drain the FIFO" and first["until"] == "FIFO is empty"
-    assert third["title"] == "Pulse enable" and third["until"] is None
+    first, second, third = record["steps"][0]["entries"]
+    assert first["type"] == "step" and first["title"] == "Drain the FIFO"
+    assert first["loop"]["until"] == "FIFO is empty" and first["loop"]["count"] == 2
+    assert second["loop"] == {"until": "done", "count": 0, "t_last": None}
+    assert third["title"] == "Pulse enable" and third["loop"]["until"] is None
     jsonschema.validate({"schema_version": "0.4", "generator": {"name": "stepdoc", "version": "x",
                          "python": "3"}, "created_at": "", "dry_run": False, "tests": [record]}, SCHEMA)
 

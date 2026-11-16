@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dis
 import functools
+import inspect
 import os
 import sys
 import time
@@ -17,6 +18,7 @@ from .model import (
     Check,
     Direction,
     Location,
+    Loop,
     Repeat,
     Section,
     Status,
@@ -89,7 +91,7 @@ class Recorder:
             return f"{_SECTION_PREFIX[self.section]}{n}"
         return f"{parent.number}.{len(parent.entries) + 1}"
 
-    def _open(self, title: str, location: Optional[Location]) -> Step:
+    def _open(self, title: str, location: Optional[Location], note: Optional[str] = None) -> Step:
         parent = self._stack[-1] if self._stack else None
         self._flush(parent)
         section = self.section if parent is None else parent.section
@@ -99,6 +101,7 @@ class Recorder:
             section=section,
             started=_perf(),
             location=location,
+            note=note,
         )
         if parent is None:
             self.steps.append(s)
@@ -214,7 +217,6 @@ class Recorder:
         start: int,
         until: Optional[str],
         clean: bool,
-        title: Optional[str] = None,
     ) -> None:
         """End of a ``repeat()`` block whose entries start at ``start``."""
         self._flush(s)
@@ -222,7 +224,7 @@ class Recorder:
         region = entries[start:]
         rest: list[Any] = []
         if not region:
-            rep = Repeat(entries=[], count=0, t=_perf(), until=until, title=title)
+            rep = Repeat(entries=[], count=0, t=_perf(), until=until)
         else:
             head, rest = region[0], region[1:]
             if isinstance(head, Repeat) and head.until is None:
@@ -233,7 +235,6 @@ class Recorder:
             else:
                 rep, rest = Repeat(entries=region, count=None, t=_entry_time(head)), []
             rep.until = until
-            rep.title = title
             if clean and rep.count is not None and _is_prefix(rest, rep.entries):
                 # The last test of a ``while`` condition: part of the loop, not a pass.
                 for a, b in zip(rep.entries, rest):
@@ -285,9 +286,11 @@ class Recorder:
         if self.collapse_repeats:
             self._fold(s, entries, floor)
 
-    def add_leaf(self, title: str, check: Check, location: Optional[Location]) -> Step:
+    def add_leaf(
+        self, title: str, check: Check, location: Optional[Location], note: Optional[str] = None
+    ) -> Step:
         """STEP-3: a one-line step holding a single check."""
-        s = self._open(title, location)
+        s = self._open(title, location, note)
         s.ended = s.started
         if self.dry_run:
             _unjudge(check)
@@ -631,11 +634,22 @@ class step:  # noqa: N801 - public API name from the brief
     A bare ``step("title")`` call, a statement on its own, records a one-line step
     with no check (STEP-9): ``1.2`` inside an open step, a top-level step outside
     one. Event listeners use it to log what the system under test did.
+
+    ``note=`` is a sentence for the reader (why the step is there, what a value
+    means), shown under the step's line in the procedure and the report.
     """
 
-    def __init__(self, title: str, *, check: Any = _NO_CHECK, record: bool = True) -> None:
+    def __init__(
+        self,
+        title: str,
+        *,
+        check: Any = _NO_CHECK,
+        record: bool = True,
+        note: Optional[str] = None,
+    ) -> None:
         self.title = title
         self.record = record
+        self.note = _note(note)
         self._step: Optional[Step] = None
         self._rec: Optional[Recorder] = None
         self._leaf = check is not _NO_CHECK
@@ -644,18 +658,18 @@ class step:  # noqa: N801 - public API name from the brief
             c = to_check(check, title)
             if rec is not None:
                 c.location = _caller_location()
-                rec.add_leaf(title, c, c.location)
+                rec.add_leaf(title, c, c.location, self.note)
         elif _is_statement(sys._getframe(1)):
             rec = _current.get()
             if rec is not None:
-                rec._close(rec._open(title, _caller_location()), None)
+                rec._close(rec._open(title, _caller_location(), self.note), None)
 
     def __enter__(self) -> Optional[Step]:
         if self._leaf:
             raise TypeError("step(..., check=...) records a one-line step; it is not a context manager")
         self._rec = _current.get()
         if self._rec is not None:
-            self._step = self._rec._open(self.title, _caller_location())
+            self._step = self._rec._open(self.title, _caller_location(), self.note)
             if not self.record:
                 self._rec._quiet += 1
         return self._step
@@ -675,11 +689,11 @@ class step:  # noqa: N801 - public API name from the brief
     def __call__(self, fn: F) -> F:
         if self._leaf:
             raise TypeError("step(..., check=...) cannot decorate a function")
-        title, record = self.title, self.record
+        title, record, note = self.title, self.record, self.note
 
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            with step(title, record=record):
+            with step(title, record=record, note=note):
                 return fn(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]
@@ -689,27 +703,57 @@ class repeat:  # noqa: N801 - reads like ``step``
     """``with repeat("Drain the FIFO", until="FIFO is empty"):`` around a loop (ACT-10).
 
     Loops collapse on their own: when the same actions come back to back, the
-    passes become one ``Repeat`` entry with a count. This block only says what the
-    loop does and what it waits for (both optional), and keeps the actions recorded
-    before and after it out of the loop. It records one entry, ``Drain the FIFO
-    (repeat until FIFO is empty)``, whose children are one pass. The last test of a ``while`` condition (a pass cut short where the
-    loop ended) is part of the entry; a pass that differs, such as the one where
-    an exception was raised, follows it as ordinary entries.
+    passes become one ``Repeat`` entry with a count. This block says what the loop
+    does and what it waits for (all optional), and keeps the actions recorded
+    before and after it out of the loop. The last test of a ``while`` condition (a
+    pass cut short where the loop ended) belongs to the loop; a pass that differs,
+    such as the one where an exception was raised, follows it as ordinary entries.
+
+    With a title the block is a step, at the top level or inside another step:
+    ``2. Drain the FIFO (repeat until FIFO is empty)``, its entries one pass
+    (``Step.loop`` holds ``until`` and the count). Without one it is a ``Repeat``
+    entry of the step it is in: ``1.2. Repeat until FIFO is empty``.
+
+    ``counter="write_count"`` names the test's variable that counts the passes,
+    ``inc=4`` how much it grows each pass (needs ``counter``). ``note=`` is a
+    sentence for the reader, shown under the line, as on ``step``.
     """
 
-    def __init__(self, title: Optional[str] = None, *, until: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        title: Optional[str] = None,
+        *,
+        until: Optional[str] = None,
+        counter: Optional[str] = None,
+        inc: Union[int, float, None] = None,
+        note: Optional[str] = None,
+    ) -> None:
+        if counter is not None and not isinstance(counter, str):
+            raise TypeError(f"counter must be the variable's name (a str), not {type(counter).__name__}")
+        if inc is not None:
+            if isinstance(inc, bool) or not isinstance(inc, (int, float)):
+                raise TypeError(f"inc must be a number, not {type(inc).__name__}")
+            if counter is None:
+                raise TypeError("inc= says how much counter= grows each pass; give counter= too")
         self.title = title
         self.until = until
+        self.counter = counter
+        self.inc = inc
+        self.note = _note(note)
         self._rec: Optional[Recorder] = None
         self._step: Optional[Step] = None
         self._start = 0
         self._saved: Optional[int] = None
+        self._outer: Optional[Step] = None
 
     def __enter__(self) -> None:
         rec = _current.get()
         if rec is None or rec._quiet:
             return None
         self._rec = rec
+        self._outer = None
+        if self.title:  # a step of its own; its entries are the pass
+            self._outer = rec._open(self.title, _caller_location(), self.note)
         self._step = rec.current_step
         rec._flush(self._step)
         entries = rec._container(self._step)
@@ -723,16 +767,40 @@ class repeat:  # noqa: N801 - reads like ``step``
         et: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
-    ) -> None:
+    ) -> bool:
         rec = self._rec
         if rec is None:
-            return
+            return False
         entries = rec._container(self._step)
         if self._saved is None:
             rec._floors.pop(id(entries), None)
         else:
             rec._floors[id(entries)] = self._saved
-        rec._close_repeat(self._step, self._start, self.until, clean=exc is None, title=self.title)
+        outer = self._outer
+        rec._close_repeat(self._step, self._start, self.until, clean=exc is None)
+        if outer is None:
+            rep = entries[self._start]
+            assert isinstance(rep, Repeat)
+            rep.note, rep.counter, rep.inc = self.note, self.counter, self.inc
+            return False
+        rep, *rest = outer.entries
+        assert isinstance(rep, Repeat)
+        outer.entries = [*rep.entries, *rest]
+        outer.loop = Loop(
+            count=rep.count, until=self.until, counter=self.counter, inc=self.inc, t_last=rep.t_last
+        )
+        _renumber(outer)
+        return rec._close(outer, exc)
+
+
+def _note(note: Optional[str]) -> Optional[str]:
+    """A ``note=`` as stored: indentation of a triple-quoted string removed, blank
+    text dropped."""
+    if note is None:
+        return None
+    if not isinstance(note, str):
+        raise TypeError(f"note must be a str, not {type(note).__name__}")
+    return inspect.cleandoc(note) or None
 
 
 # (code, offset of the call) -> whether its result is discarded (STEP-9).

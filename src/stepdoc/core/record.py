@@ -17,7 +17,7 @@ import platform
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Union
 
-from .model import Action, Check, Location, Repeat, Step
+from .model import Action, Check, Location, Loop, Repeat, Step
 from .recorder import Recorder
 
 SCHEMA_ID = "urn:stepdoc:schema:run-record:0.4"  # no published URL yet
@@ -133,7 +133,19 @@ def _step(s: Step, ctx: _Ctx) -> dict[str, Any]:
         "ended": ctx.t(s.ended),
         "error": s.error,
         "location": ctx.loc(s.location),
+        **({} if s.note is None else {"note": s.note}),
+        **({} if s.loop is None else {"loop": _loop(s.loop, ctx)}),
         "entries": [_entry(e, ctx) for e in s.entries],
+    }
+
+
+def _loop(lp: Loop, ctx: _Ctx) -> dict[str, Any]:
+    return {
+        "until": lp.until,
+        **({} if lp.counter is None else {"counter": lp.counter}),
+        **({} if lp.inc is None else {"inc": lp.inc}),
+        "count": lp.count,
+        "t_last": ctx.t(lp.t_last),
     }
 
 
@@ -142,7 +154,9 @@ def _repeat(r: Repeat, ctx: _Ctx) -> dict[str, Any]:
         "type": "repeat",
         "number": r.number,
         "until": r.until,
-        **({} if r.title is None else {"title": r.title}),
+        **({} if r.note is None else {"note": r.note}),
+        **({} if r.counter is None else {"counter": r.counter}),
+        **({} if r.inc is None else {"inc": r.inc}),
         "count": r.count,
         "t": ctx.t(r.t),
         "t_last": ctx.t(r.t_last),
