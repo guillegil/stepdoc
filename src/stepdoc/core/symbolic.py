@@ -87,7 +87,7 @@ def _is_skipped(frame: FrameType) -> bool:
 class Site:
     """A code location captured at event time. Cheap to create, resolved later."""
 
-    __slots__ = ("code", "lasti", "lineno", "globals", "callee", "outer")
+    __slots__ = ("code", "lasti", "lineno", "globals", "callee", "outer", "callers")
 
     def __init__(
         self,
@@ -97,6 +97,7 @@ class Site:
         globals_: dict[str, Any],
         callee: Optional[CodeType],
         outer: Optional["Site"],
+        callers: tuple[Any, ...] = (),
     ) -> None:
         self.code = code
         self.lasti = lasti
@@ -104,6 +105,10 @@ class Site:
         self.globals = globals_
         self.callee = callee
         self.outer = outer
+        self.callers = callers
+        """Code and instruction of the frames that called this one, nearest first,
+        ``CALLERS`` of them at most: two events with equal ``callers`` came through
+        the same calls (loop folding compares them, ACT-4/ACT-10)."""
 
     @property
     def filename(self) -> str:
@@ -174,7 +179,28 @@ def _site(frame: FrameType, callee: Optional[CodeType]) -> Site:
             caller = caller.f_back
         if caller is not None:
             outer = _site(caller, inner.f_code)
-    return Site(code, frame.f_lasti, frame.f_lineno, frame.f_globals, callee, outer)
+    return Site(code, frame.f_lasti, frame.f_lineno, frame.f_globals, callee, outer, _callers(frame))
+
+
+CALLERS = 4
+"""How many calling frames a ``Site`` remembers (``Site.callers``)."""
+
+
+def _callers(frame: FrameType) -> tuple[Any, ...]:
+    """``(code, lasti, code, lasti, ...)`` of up to ``CALLERS`` frames above ``frame``."""
+    f = frame.f_back
+    if f is None:
+        return ()
+    g = f.f_back
+    if g is None:
+        return (f.f_code, f.f_lasti)
+    h = g.f_back
+    if h is None:
+        return (f.f_code, f.f_lasti, g.f_code, g.f_lasti)
+    i = h.f_back
+    if i is None:
+        return (f.f_code, f.f_lasti, g.f_code, g.f_lasti, h.f_code, h.f_lasti)
+    return (f.f_code, f.f_lasti, g.f_code, g.f_lasti, h.f_code, h.f_lasti, i.f_code, i.f_lasti)
 
 
 # --------------------------------------------------------------------------- #

@@ -5,7 +5,8 @@ end of each test phase, to its ``pytest_verify_results`` hook as JSON-safe
 descriptors. This adapter places each one in the step it was made in, using the
 descriptor's ``location`` (and ``called_from`` for checks made in helpers), and
 renders expected values given by name symbolically in the procedure
-(``'Stored age' == <age>``).
+(``'Stored age' == <age>``). Checks made in every pass of a loop that collapsed
+fold into its one pass, as passing asserts do (:meth:`_Placer.fold_loops`).
 
 Without this adapter, stepdoc cannot see verify's checks, so no step of a test
 that uses verify is shown as passed (NFR-7).
@@ -23,10 +24,22 @@ from typing import Any, Iterator, Mapping, Optional, Sequence
 import pytest
 
 from ..core.model import Action, Check, Location, Repeat, Section, Step
-from ..core.recorder import Recorder
+from ..core.recorder import Recorder, _fold_reads, _renumber
 from ..core.symbolic import target_pattern
 from . import Adapter, Host
-from ._source import argument, calls_at, same_file, source_text, statement_span, symbolic
+from ._source import (
+    argument,
+    calls_at,
+    loop_at,
+    outer_loops,
+    same_file,
+    source_text,
+    statement_span,
+    symbolic,
+)
+
+_Site = tuple[tuple[str, int], ...]
+"""Where a check was made: its anchors (normalised file and line)."""
 
 _SECTION: dict[str, Section] = {"setup": "setup", "call": "procedure", "teardown": "teardown"}
 
@@ -72,6 +85,7 @@ class _Plugin:
         placer = _Placer(rec, self.host.root)
         for d in checks:
             placer.place(d, _SECTION.get(str(d.get("phase") or when), "procedure"))
+        placer.fold_loops()
         rec.resolve_notes()
 
 
@@ -316,12 +330,25 @@ class _Placer:
         self.rec = rec
         self.root = root
         self.paths: list[tuple[Step, ...]] = []
-        self._walk(rec.steps, ())
+        self._walk(rec.steps[rec.attempt :], ())  # this attempt's steps only
         self.at: dict[int, int] = {id(p[-1]): i for i, p in enumerate(self.paths)}
         self.spans: dict[int, Optional[tuple[str, int, int]]] = {}
         self.cursor = -1
         self.seen: dict[int, set[tuple[str, int]]] = {}
         self.next_index: dict[int, int] = {}
+        self.made: dict[int, tuple[_Site, str]] = {}
+        """id(check) -> its key, for the checks this placer added that may be in a
+        loop (:meth:`fold_loops`): its anchors (normalised file and line) and
+        symbolic text, the same check in every pass. One shared tuple per key
+        (``keys``): thousands in a long loop."""
+        self.keys: dict[tuple[_Site, str], tuple[_Site, str]] = {}
+        self.sites: dict[tuple[Any, Any], Optional[_Site]] = {}
+        """(location, called_from) -> the anchors, if made in a loop (:meth:`_site`)."""
+        self.targets: dict[int, tuple[str, str]] = {}
+        """id(check) -> the read's target its text was named after, if any."""
+        self.wordings: dict[tuple[_Site, str], _Wording] = {}
+        """key -> the wording of its first check (the same for all of them but
+        ``rest``, which the descriptor gives)."""
         self.reuse: dict[tuple[int, str, int], tuple[int, tuple[str, str]]] = {}
         """(step, file, line) -> how many more checks from there take the wording
         of a read already absorbed (collapsed polling: ``count`` reads of one
@@ -358,6 +385,7 @@ class _Placer:
 
     def place(self, d: Mapping[str, Any], section: Section) -> None:
         check, wording = _build(d, self.root)
+        written = check.symbolic_text or check.text  # before a read names the value
         if check.note is None:
             check.note_from_comment = True  # looked up when the recorder resolves
         anchors = [a for a in (check.location, _location(d.get("called_from"), self.root)) if a]
@@ -401,8 +429,30 @@ class _Placer:
                 index = self._index(best, path[-1], anchors, wording.subject.span if wording else None)
             at = self.rec.insert_check(path, check, index, fold=fold, start=start, fold_exprs=exprs)
         self.next_index[step] = at + 1
+        targets = None
         if wording is not None and slot is not None:
-            self._reword(check, wording, slot, entries, start, at)
+            targets = self._reword(check, wording, slot, entries, start, at)
+        site = self._site(d.get("location"), d.get("called_from"), lines)
+        if site is not None:
+            same = (site, written)
+            same = self.keys.setdefault(same, same)
+            self.made[id(check)] = same
+            if targets is not None:
+                self.targets[id(check)] = targets
+            if wording is not None:
+                self.wordings.setdefault(same, wording)
+
+    def _site(
+        self, location: Any, called_from: Any, lines: list[tuple[str, int]]
+    ) -> Optional[_Site]:
+        """The anchors (``lines``) of a check that may be part of a loop's pass,
+        one shared tuple per call site: it was made inside a ``for`` or
+        ``while`` statement. Only those are kept for :meth:`fold_loops`."""
+        key = (location, called_from)
+        if key not in self.sites:
+            looped = self.rec.collapse_repeats and any(loop_at(f, n) is not None for f, n in lines)
+            self.sites[key] = tuple(lines) if looped else None
+        return self.sites[key]
 
     def _reword(
         self,
@@ -412,14 +462,15 @@ class _Placer:
         entries: list[Any],
         start: int,
         at: int,
-    ) -> None:
+    ) -> Optional[tuple[str, str]]:
         """Name the checked value after the read that produced it (a register:
         ``dev.blk.reg<ch>.ready``), only when that read provably belongs to this
         check's pass: one it absorbed; for the next ``count - 1`` checks from
         the same line, a polled read (``count`` > 1) an earlier check absorbed; a
         read in a collapsed loop just before it (every pass reads the same
         target); the one read a bare variable was bound to. Otherwise the check
-        keeps the argument's source text."""
+        keeps the argument's source text. Returns the targets applied (symbolic
+        and concrete), if any."""
         loc = check.location
         assert loc is not None
         subject = wording.subject
@@ -428,12 +479,12 @@ class _Placer:
             found = _targets(read)
             self.reuse[key] = (read.count - 1, found)
             wording.apply(check, *found)
-            return
+            return found
         left, found = self.reuse.get(key, (0, ("", "")))
         if left > 0:
             self.reuse[key] = (left - 1, found)
             wording.apply(check, *found)
-            return
+            return found
         for e in entries[start:at]:
             if isinstance(e, Repeat):
                 read = next(
@@ -445,11 +496,14 @@ class _Placer:
                     passes = e.count if isinstance(e.count, int) else 1
                     self.reuse[key] = (passes * read.count - 1, found)
                     wording.apply(check, *found)
-                    return
+                    return found
         if subject.name is not None:
             bound = {_targets(a) for a in _reads(entries) if a.bound_to == subject.name}
             if len(bound) == 1:
-                wording.apply(check, *bound.pop())
+                found = bound.pop()
+                wording.apply(check, *found)
+                return found
+        return None
 
     def _index(
         self, i: int, s: Step, anchors: list[Location], span: Optional[tuple[int, int]] = None
@@ -474,6 +528,258 @@ class _Placer:
             if loc is not None and same_file(loc.file, anchor.file) and loc.line > after:
                 return j
         return len(s.entries)
+
+    # Loops ---------------------------------------------------------------- #
+    def fold_loops(self) -> None:
+        """Fold the checks this placer added inside collapsed loops (ACT-10).
+
+        A loop collapses while it runs, but verify's checks arrive at the end of
+        the phase, after it. Live checks that pass in every pass are part of
+        the loop's one shown pass; so are these: the checks made at one call
+        site with one symbolic text (the same check, pass after pass) become
+        one check with the last pass's values, when they were made in the
+        ``for``/``while`` statement the pass's actions ran in, once per pass
+        (as many as the loop's count) or once per iteration when a pass covers
+        several (a loop over channels, ``i % 4``: one check per position in the
+        pass), and they all passed (or none was judged). The loop is a step of
+        a titled ``repeat()`` (the step's entries are the pass), or a
+        ``Repeat`` entry (an untitled ``repeat()`` or a loop that collapsed on
+        its own): checks of a Repeat were placed next to it, before it (made
+        before the pass's first action) or after it, and move into it, taking
+        the read on their line that it holds (ACT-5).
+
+        A check that failed in some pass is not folded: every pass's result of
+        it stays visible, in pass order, next to the pass (after the pass of a
+        titled ``repeat()``; before or after a Repeat, where it was placed), and
+        the loop keeps its count, so the failing pass can be told. Checks made
+        in some passes only, in an inner loop, or in another loop stay as they
+        are."""
+        if not self.made or not self.rec.collapse_repeats:
+            return
+        self._fold_repeats(self.rec.unscoped)
+        for s in self.rec.steps[self.rec.attempt :]:
+            self._fold_step(s)
+
+    def _fold_step(self, s: Step) -> None:
+        changed = False
+        if s.loop is not None and isinstance(s.loop.count, int) and s.loop.count >= 2:
+            changed = self._fold_pass(s, s.loop.count)
+        changed = self._fold_repeats(s.entries) or changed
+        if changed:
+            _renumber(s)
+        for e in list(s.entries):
+            if isinstance(e, Step):
+                self._fold_step(e)
+            elif isinstance(e, Repeat):
+                for c in e.entries:
+                    if isinstance(c, Step):
+                        self._fold_step(c)
+
+    def _groups(self, entries: Sequence[Any]) -> list[list[Check]]:
+        """This placer's checks among ``entries`` (not composites), the same
+        check together, in the order they were made."""
+        groups: dict[Any, list[Check]] = {}
+        for e in entries:
+            if not isinstance(e, Check) or e.children:
+                continue
+            key = self.made.get(id(e))
+            if key is not None:
+                groups.setdefault(key, []).append(e)
+        return list(groups.values())
+
+    def _positions(
+        self, checks: list[Check], count: int, pass_: _Pass
+    ) -> Optional[list[list[Check]]]:
+        """The checks of each position in the pass (each one per pass, in pass
+        order), when ``checks`` were made in the pass's loop statement once per
+        iteration; else None."""
+        if not all(self._in(a, pass_.loops) for a in {self.made[id(c)][0] for c in checks}):
+            return None  # an inner loop, another loop, or no loop of the pass
+        per, rest = divmod(len(checks), count)
+        if rest or per < 1 or (per > 1 and per != pass_.iterations):
+            return None  # some passes only (or the totals just happen to match)
+        return [checks[k::per] for k in range(per)]
+
+    def _fold_pass(self, s: Step, count: int) -> bool:
+        """A titled ``repeat()`` step: its entries are the pass. When none of them
+        tells the loop (actions made in helpers, outside any loop), the loop is
+        the one ``for``/``while`` statement of the ``with repeat(...)`` block,
+        if it has just one."""
+        changed = False
+        entries = s.entries
+        pass_ = _Pass.of([e for e in entries if id(e) not in self.made], entries)
+        if not pass_.loops and s.location is not None:
+            f = _norm(s.location.file)
+            loops = outer_loops(f, *statement_span(s.location.file, s.location.line))
+            if len(loops) == 1:
+                pass_.loops = {(f, loops[0])}
+        for checks in self._groups(entries):
+            positions = self._positions(checks, count, pass_)
+            if positions is None:
+                continue
+            if all(map(_foldable, positions)):
+                drop: set[int] = set()
+                for position in positions:
+                    self._merge(position)
+                    drop.update(id(c) for c in position[1:])
+                entries[:] = [e for e in entries if id(e) not in drop]
+            else:  # every pass's result, as it ran, after the pass
+                drop = {id(c) for c in checks}
+                entries[:] = [*(e for e in entries if id(e) not in drop), *checks]
+            changed = True
+        return changed
+
+    def _fold_repeats(self, entries: list[Any]) -> bool:
+        """The ``Repeat`` entries among ``entries`` take the checks next to them.
+        So does a loop whose pass is one action (an ``Action`` with a count, the
+        same write each pass, ACT-4): it becomes a ``Repeat`` of it, as when the
+        checks are live asserts."""
+        changed = False
+        for loop in [e for e in entries if isinstance(e, (Repeat, Action))]:
+            count = loop.count
+            if not isinstance(count, int) or count < 2:
+                continue
+            i = next(k for k, e in enumerate(entries) if e is loop)
+            first, last = i, i + 1
+            while first > 0 and self._tracked(entries[first - 1]):
+                first -= 1
+            while last < len(entries) and self._tracked(entries[last]):
+                last += 1
+            run = entries[first:i] + entries[i + 1 : last]
+            if not run:
+                continue
+            body = loop.entries if isinstance(loop, Repeat) else [loop]
+            pass_ = _Pass.of(body, body)
+            for checks in self._groups(run):
+                positions = self._positions(checks, count, pass_)
+                if positions is None or not all(map(_foldable, positions)):
+                    continue
+                rep = loop = _as_repeat(entries, loop) if isinstance(loop, Action) else loop
+                kept = [self._merge(position) for position in positions]
+                drop = {id(c) for c in checks}
+                entries[:] = [e for e in entries if id(e) not in drop]
+                for check in kept:
+                    self._into(rep, check, pass_.loops)
+                changed = True
+        return changed
+
+    def _tracked(self, e: Any) -> bool:
+        return isinstance(e, Check) and id(e) in self.made
+
+    @staticmethod
+    def _in(lines: Sequence[tuple[str, int]], loops: set[tuple[str, tuple[int, int]]]) -> bool:
+        """Whether one of ``lines`` is directly in one of the loop statements."""
+        return any((f, loop_at(f, n)) in loops for f, n in lines)
+
+    def _merge(self, checks: list[Check]) -> Check:
+        """The first check, standing for all of them with the last one's values."""
+        kept, last = checks[0], checks[-1]
+        if last is kept:
+            return kept
+        kept.actual, kept.expected, kept.detail = last.actual, last.expected, last.detail
+        kept.source = last.source
+        wording = self._wording(kept)  # with the last one's descriptor
+        targets = next((t for t in map(self.targets.get, map(id, checks)) if t), None)
+        if wording is not None and targets is not None:
+            wording.apply(kept, *targets)
+        else:
+            kept.text, kept.symbolic_text = last.text, last.symbolic_text
+        if not kept.reads:
+            kept.reads = next((c.reads for c in checks if c.reads), [])
+        return kept
+
+    def _wording(self, check: Check) -> Optional[_Wording]:
+        """How ``check`` reads (:class:`_Wording`), from its key's first check and
+        its own descriptor."""
+        key = self.made.get(id(check))
+        first = None if key is None else self.wordings.get(key)
+        d = check.source
+        if first is None or not isinstance(d, Mapping):
+            return None
+        description = str(d.get("description") or d.get("name") or d.get("check_type") or "check")
+        rest = _rest(description, d.get("name"))
+        if rest is None:
+            return None
+        sym_rest = _symbolic_rest(d, rest, check.location, _hint(d))
+        return _Wording(first.prefix, rest, sym_rest, first.subject)
+
+    def _into(self, rep: Repeat, check: Check, loops: set[tuple[str, tuple[int, int]]]) -> None:
+        """Put ``check`` in the pass ``rep`` shows, after the entries of earlier
+        lines, taking a read on its line that the pass holds (ACT-5)."""
+        lines = self.made[id(check)][0]
+        anchor = next((a for a in lines if (a[0], loop_at(*a)) in loops), lines[0])
+        after = anchor[1]
+        wording = self._wording(check)
+        own = check.location is not None and _norm(check.location.file) == anchor[0]
+        span = wording.subject.span if wording is not None else None
+        if span is not None and own and span[0] <= after <= span[1]:
+            after = span[1]
+        at = len(rep.entries)
+        for j, e in enumerate(rep.entries):
+            loc = e.location
+            if loc is not None and loc.line > after and _norm(loc.file) == anchor[0]:
+                at = j
+                break
+        if wording is not None and own and not check.reads:
+            at = _fold_reads(rep.entries, 0, at, check, wording.subject.span, wording.subject.exprs)
+            read = next((a for a in check.reads if a.read_expr == wording.subject.key), None)
+            if read is not None:
+                wording.apply(check, *_targets(read))
+        rep.entries.insert(at, check)
+
+
+def _foldable(checks: Sequence[Check]) -> bool:
+    """All passed (or none was judged), and at most one took reads."""
+    first = checks[0].passed
+    return (
+        first is not False
+        and all(c.passed == first for c in checks)
+        and sum(1 for c in checks if c.reads) <= 1
+    )
+
+
+def _as_repeat(entries: list[Any], action: Action) -> Repeat:
+    """Replace ``action`` (``count`` times the same event) in ``entries`` by a
+    ``Repeat`` of ``count`` passes of it, as ``repeat()`` does for a pass of one
+    action."""
+    assert action.count >= 2
+    rep = Repeat(entries=[action], count=action.count, t=action.t, t_last=action.t_last)
+    rep.section = action.section
+    action.count, action.t_last = 1, None
+    entries[next(k for k, e in enumerate(entries) if e is action)] = rep
+    return rep
+
+
+@dataclass
+class _Pass:
+    """The pass a collapsed loop shows, as far as folding needs it."""
+
+    loops: set[tuple[str, tuple[int, int]]]
+    """The ``for``/``while`` statements (file, first and last line) its entries
+    ran in: the innermost one of each entry, and of each read."""
+    iterations: int
+    """Iterations of the loop statement one pass covers: how many times the line
+    of its first entry (or read) comes in it. 1 but for a pass that spans
+    several iterations (a loop over channels whose passes repeat every 4)."""
+
+    @staticmethod
+    def of(live: Sequence[Any], entries: Sequence[Any]) -> _Pass:
+        """``live``: the entries recorded while the loop ran; ``entries``: the
+        whole pass, whose checks' reads ran in it too."""
+        alive = {id(e) for e in live}
+        where: list[tuple[str, int]] = []
+        for e in entries:
+            locs = [a.location for a in e.reads] if isinstance(e, Check) else []
+            if id(e) in alive:
+                locs.insert(0, e.location)
+            where.extend((_norm(loc.file), loc.line) for loc in locs if loc is not None)
+        loops: set[tuple[str, tuple[int, int]]] = set()
+        for f, n in where:
+            span = loop_at(f, n)
+            if span is not None:
+                loops.add((f, span))
+        iterations = where.count(where[0]) if where else 1
+        return _Pass(loops, iterations)
 
 
 def _targets(read: Action) -> tuple[str, str]:

@@ -97,9 +97,16 @@ def _action(a: Action, ctx: _Ctx) -> dict[str, Any]:
         "t": ctx.t(a.t),
         "count": a.count,
         "t_last": ctx.t(a.t_last),
+        **_values(a),
         "meta": to_jsonable(a.meta),
         **_section(a.section),
     }
+
+
+def _values(a: Action) -> dict[str, Any]:
+    if a.values is None:
+        return {}
+    return {"values": [to_jsonable(v) for v in a.values], "values_count": a.values_count}
 
 
 def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:

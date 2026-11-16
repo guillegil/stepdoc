@@ -126,7 +126,9 @@ def test_lambda_and_comprehension(dev, rec):
     # setattr() is a C function, so it has no frame: the "callee" used to bind
     # argument names is Block.__setattr__(self, name, value). Its third
     # parameter happens to be called `value` too, so this works by luck.
-    assert vals == ["<v>", "<x>", "<x>"]
+    # The comprehension's writes come from one line: one entry, both values kept.
+    assert vals == ["<v>", "<x>"]
+    assert rec.unscoped[1].count == 2 and rec.unscoped[1].values == [10, 20]
 
 
 def test_exec_without_source_falls_back(dev, rec):

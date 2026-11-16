@@ -14,6 +14,7 @@ from typing import Any, Callable, Collection, Iterator, Optional, Sequence, Type
 
 from .model import (
     DEFAULT_DIRECTIONS,
+    MAX_VALUES,
     Action,
     Check,
     Direction,
@@ -71,6 +72,11 @@ class Recorder:
         self.ended: Optional[float] = None
         self.steps: list[Step] = []
         self.unscoped: list[Union[Action, Check, Repeat]] = []  # ACT-3
+        self.attempt = 0
+        """Index in ``steps`` of the first step of the current attempt: a rerun
+        (pytest-reporter's retries, pytest-rerunfailures) runs the test again on
+        this recorder. The pytest plugin sets it at each attempt's setup, so
+        checks that arrive after the fact go to this attempt's steps."""
         self._stack: list[Step] = []
         self._tokens: list[Any] = []
         self._quiet = 0
@@ -194,7 +200,7 @@ class Recorder:
             if not _same_event(entries[n - 1 - p], new):
                 continue
             first, second = entries[n - 2 * p : n - p], entries[n - p :]
-            if all(map(_same_event, first, second)):
+            if all(map(_same_pass_entry, first, second)):
                 for a, b in zip(first, second):
                     _take_values(a, b)
                 rep = Repeat(entries=first, count=2, t=_entry_time(first[0]), t_last=_end_time(second[-1]), partial=[])
@@ -432,9 +438,14 @@ _MAX_PASS = 8
 
 
 def _same_event(a: Any, b: Any) -> bool:
-    """The same action from the same code: same op and target, and for writes and
-    requests the same value (reads may return anything). For checks: the same
-    check from the same line, passed (or not judged) both times."""
+    """The same action from the same code: same op and target. Reads may return
+    anything; writes and requests that send the same value count too. A write or
+    request that sends another value is the same event only when it comes from the
+    same statement through the same calls (``_same_path``): a loop writing ``i`` is
+    one event each pass, and the entry keeps every value (``Action.values``), but a
+    helper called from two lines, or two writes on one line, stay two events.
+    Without a captured site, writes and requests must send the same value. For
+    checks: the same check from the same line, passed (or not judged) both times."""
     if type(a) is Check and type(b) is Check:
         return (
             a.text == b.text
@@ -450,16 +461,49 @@ def _same_event(a: Any, b: Any) -> bool:
         return False
     if (a.op, a.target, a.direction, a.name) != (b.op, b.target, b.direction, b.name):
         return False
-    if a.site is not None and b.site is not None:
+    sa, sb = a.site, b.site
+    if sa is not None and sb is not None:
         # Same line, not same instruction: a ``while`` condition compiles twice.
-        if (a.site.code, a.site.lineno) != (b.site.code, b.site.lineno):
+        if (sa.code, sa.lineno) != (sb.code, sb.lineno):
             return False
-    if b.direction != "out":
-        try:
-            return bool(a.value == b.value)
-        except Exception:
+        if b.direction == "out":
+            return True
+    elif b.direction == "out":
+        return True
+    if _equal(a.value, b.value):
+        return True
+    return sa is not None and sb is not None and _same_path(sa, sb)
+
+
+def _same_pass_entry(a: Any, b: Any) -> bool:
+    """Entries of two loop passes match (ACT-10): the same event and, for a write or
+    request that sent several values in a row, as many times in each pass (two
+    passes' writes merged into one line are not a pass that writes twice)."""
+    if not _same_event(a, b):
+        return False
+    if type(a) is not Action or a.direction == "out" or a.count == b.count:
+        return True
+    return a.values is None and b.values is None
+
+
+def _same_path(a: Any, b: Any) -> bool:
+    """Two sites are the same statement reached through the same calls: the same
+    instruction, the same calling frames (``Site.callers``), and the same chain of
+    look-through callers (``Site.outer``)."""
+    while a is not None and b is not None:
+        if a.code is not b.code or a.lasti != b.lasti or a.callers != b.callers:
             return False
-    return True
+        a, b = a.outer, b.outer
+    return a is b
+
+
+def _equal(a: Any, b: Any) -> bool:
+    if a is b:
+        return True
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
 
 
 def _is_repeat(last: Any, new: Action) -> bool:
@@ -469,20 +513,50 @@ def _is_repeat(last: Any, new: Action) -> bool:
 
 
 def _absorb(last: Action, new: Action) -> None:
+    """ACT-4: ``new``, a fresh event, is ``last`` again (the hot path of a loop)."""
     last.count += 1
     last.t_last = new.t
-    _take_values(last, new)
+    if last.direction != "out":
+        if last.values is None and (last.value is new.value or _equal(last.value, new.value)):
+            last.values_count += 1
+        else:
+            _add_values(last, new)
+    last.value = new.value
+    last.meta = new.meta
 
 
 def _take_values(kept: Any, new: Any) -> None:
-    """A collapsed entry shows the values of the latest event."""
+    """A collapsed entry shows the values of the latest event; a write or request
+    also keeps the sequence of values it sent when they differ."""
     if isinstance(kept, Check):
         kept.actual, kept.expected, kept.detail = new.actual, new.expected, new.detail
         for a, b in zip(kept.reads, new.reads):
             _take_values(a, b)
         return
+    if kept.direction != "out":
+        _add_values(kept, new)
     kept.value = new.value
     kept.meta = new.meta
+
+
+_KEEP = MAX_VALUES // 2
+
+
+def _add_values(kept: Action, new: Action) -> None:
+    """Append the values ``new`` sent to those of ``kept`` (``Action.values``)."""
+    vals = kept.values
+    if vals is None:
+        if new.values is None and _equal(kept.value, new.value):
+            kept.values_count += new.values_count
+            return
+        vals = kept.values = [kept.value] * min(kept.values_count, MAX_VALUES)
+    if new.values is None:
+        vals.extend([new.value] * min(new.values_count, MAX_VALUES))
+    else:
+        vals.extend(new.values)
+    kept.values_count += new.values_count
+    if len(vals) > MAX_VALUES:
+        del vals[_KEEP : len(vals) - _KEEP]
 
 
 def _flat(entries: Sequence[Any]) -> list[Any]:
@@ -500,11 +574,20 @@ def _continue(rep: Repeat, new: Union[Action, Check]) -> bool:
     does next (ACT-10); polling inside a pass stays one entry."""
     partial = rep.partial
     assert partial is not None
-    if partial and isinstance(new, Action) and _same_event(partial[-1], new):
-        _absorb(partial[-1], new)
-        return True
     body: list[Any] = _flat(rep.entries)
     pos = len(partial)
+    if partial and isinstance(new, Action) and _same_event(partial[-1], new):
+        last = partial[-1]
+        # A write that sends another value repeats inside a pass only when the
+        # loop's pass repeats it too: else it is the next pass's write, and the
+        # pass in progress skipped what came between.
+        if (
+            new.direction == "out"
+            or body[pos - 1].count > 1
+            or (last.values is None and _equal(last.value, new.value))
+        ):
+            _absorb(last, new)
+            return True
     if pos < len(body) and _same_event(body[pos], new):
         partial.append(new)
         if len(partial) == len(body):

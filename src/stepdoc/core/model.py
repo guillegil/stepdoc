@@ -11,6 +11,9 @@ Status = Literal["passed", "failed", "error", "not_run", "unknown"]
 Direction = Literal["in", "out", "exchange"]
 Section = Literal["setup", "procedure", "teardown"]
 
+MAX_VALUES = 64
+"""Most values an ``Action`` keeps in ``values`` (the first and last 32)."""
+
 # Used when a bridge does not say which way data flows. Unknown ops are "in".
 DEFAULT_DIRECTIONS: dict[str, Direction] = {
     "read": "out",
@@ -48,6 +51,16 @@ class Action:
     """How many identical consecutive events this entry stands for (ACT-4 polling)."""
     t_last: Optional[float] = None
     """Time of the last repeated event when ``count > 1``."""
+    values: Optional[list[Any]] = None
+    """Every value sent, in order, when the events this entry stands for did not all
+    send the same one: the same write in a loop (ACT-4), or this action in each pass
+    of a collapsed loop (ACT-10). ``None`` when they all sent ``value``, which is
+    always the last one. Holds at most ``MAX_VALUES`` items: past that, the first and
+    the last half, and ``values_count`` says how many there were."""
+    values_count: int = 1
+    """How many events ``values`` covers: ``len(values)`` unless it was capped. In a
+    collapsed loop it counts every pass (``count`` is the first pass's), and an
+    unfinished last pass (a ``break``) adds its values too."""
     section: Optional[Section] = None
     """Set on unscoped actions only: the phase (setup, procedure, teardown) they ran in."""
     name: Optional[str] = None
