@@ -32,6 +32,8 @@ class Line:
     is_step: bool = False
     remark: Optional[str] = None
     """A step's or repeat's ``note=``, shown under its line in both documents."""
+    aside: Optional[str] = None
+    """A check's note, prose shown after ``code`` in parentheses (CHK-9)."""
 
 
 def show(value: Any) -> str:
@@ -160,7 +162,8 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
     code = (c.get("symbolic_text") or c["text"]) if symbolic else c["text"]
     if c.get("selected"):
         code += f" [→ {c['selected']}]"
-    return Line(c.get("number"), "Verify", code, result, mark=mark, depth=depth)
+    note = c.get("note") or None
+    return Line(c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note)
 
 
 def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[Line]:
@@ -234,6 +237,8 @@ def plain(line: Line) -> str:
     """A line as plain text, without status marks or notes."""
     head = f"{line.number}. " if line.number else ("- " if not line.is_step else "")
     body = " ".join(p for p in (line.verb, line.code) if p)
+    if line.aside:
+        body += f" ({' '.join(line.aside.split())})"
     if line.result:
         body += f" -> {line.result}"
     return "   " * line.depth + head + body

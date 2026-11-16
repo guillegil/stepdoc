@@ -15,6 +15,7 @@ import math
 import os
 import platform
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Iterable, Optional, Union
 
 from .model import Action, Check, Location, Loop, Repeat, Step
@@ -72,6 +73,7 @@ class _Ctx:
         return {"file": relative_path(loc.file, self.root), "line": loc.line}
 
 
+@lru_cache(maxsize=4096)
 def relative_path(path: str, root: str) -> str:
     """Paths relative to the project root, so records from different machines diff cleanly."""
     try:
@@ -115,6 +117,7 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         "location": ctx.loc(c.location),
         **_section(c.section),
         **({} if c.symbolic_text is None else {"symbolic_text": c.symbolic_text}),
+        **({} if c.note is None else {"note": c.note}),
     }
 
 

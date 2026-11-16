@@ -120,6 +120,8 @@ def _line(line: Line) -> str:
         body = _title(line.code)
     else:
         body = " ".join(p for p in (escape(line.verb), _code(line.code)) if p)
+        if line.aside:
+            body += f' <span class="aside">({escape(" ".join(line.aside.split()))})</span>'
         if line.result:
             body += f' <span class="result">→ {_code(line.result)}</span>'
     if line.note:

@@ -184,7 +184,8 @@
         "reads": {"type": "array", "items": {"$ref": "#/$defs/action"}, "description": "Reads on the check's source line that fed it (ACT-5)"},
         "location": {"$ref": "#/$defs/location"},
         "section": {"$ref": "#/$defs/section"},
-        "symbolic_text": {"type": "string", "description": "Text for the procedure when it differs from text (an adapter's check with a symbolic expected value)"}
+        "symbolic_text": {"type": "string", "description": "Text for the procedure when it differs from text (an adapter's check with a symbolic expected value or checked register)"},
+        "note": {"type": "string", "description": "Words for the reader, shown after the check's text in parentheses: the producer's note=, else a source comment (CHK-9)"}
       }
     }
   }

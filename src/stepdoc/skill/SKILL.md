@@ -93,6 +93,9 @@ database, CLI and device recipes and every `record_action` argument.
 - `stepdoc.attach_check(check, text)` adds a check to the current step.
 - `check=` accepts a `bool`, a callable returning `bool`, a `stepdoc.Check`, or an
   object a registered converter understands. Anything else raises `CheckTypeError`.
+- A comment directly above a check (or at the end of its line) is its note:
+  `Verify dat.txfe == 1 (CMD FIFO empty)`. Write it for the reader; `note=` on a
+  verify check wins. `stepdoc_comment_notes = false` turns comment notes off.
 - stepdoc never compares values itself.
 
 Details: [references/checks.md](references/checks.md).

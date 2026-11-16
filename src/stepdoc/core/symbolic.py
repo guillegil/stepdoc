@@ -208,6 +208,8 @@ class Resolution:
     ``reg.value = v`` gives ``dut.block.reg<ch>.value``. ``None`` when nothing in
     the target varies."""
     bound_to: Optional[str] = None
+    node_source: Optional[str] = None
+    """The whole expression the instruction belongs to, unparsed (``dat.txfe``)."""
     helper_params: frozenset[str] = frozenset()
     outer: Optional["Resolution"] = None
     note: Optional[str] = None
@@ -334,6 +336,8 @@ def _statement_fallback(stmts: Any) -> Optional[ast.AST]:
 
 def _classify(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
     res = _classify_node(node, callee)
+    if isinstance(node, ast.expr):
+        res.node_source = _unparse(node)
     target = node.func if isinstance(node, ast.Call) else node
     if res.found and isinstance(target, ast.expr):
         res.target_pattern = target_pattern(target)
@@ -408,12 +412,12 @@ def _classify_node(node: ast.AST, callee: Optional[CodeType]) -> Resolution:
 _ALIAS_DEPTH = 4
 
 
-def target_pattern(node: ast.expr) -> Optional[str]:
+def target_pattern(node: ast.expr, aliases: bool = True) -> Optional[str]:
     """``node`` as a path whose variable parts read ``<expr>``, or ``None`` when
     every part is fixed. Handles ``getattr(obj, "name" | f"...{x}" | name)``,
-    subscripts and local names assigned once before the line (aliases)."""
+    subscripts and, with ``aliases``, local names assigned once before the line."""
     try:
-        text, varies = _pattern(node, _ALIAS_DEPTH)
+        text, varies = _pattern(node, _ALIAS_DEPTH if aliases else 0)
     except Exception:  # pragma: no cover - defensive: never break recording
         return None
     return text if varies else None
@@ -452,12 +456,17 @@ def _name_part(node: ast.expr, depth: int) -> tuple[str, bool]:
         return node.value, False
     if isinstance(node, ast.JoinedStr):
         out = []
+        varies = False
         for part in node.values:
             if isinstance(part, ast.Constant):
                 out.append(str(part.value))
             elif isinstance(part, ast.FormattedValue):
+                if isinstance(part.value, ast.Constant) and part.format_spec is None and part.conversion == -1:
+                    out.append(str(part.value.value))  # f"reg{3}" names reg3
+                    continue
                 out.append(f"<{_unparse(part.value)}>")
-        return "".join(out), True
+                varies = True
+        return "".join(out), varies
     if isinstance(node, ast.Name) and depth > 0:
         alias = _alias_of(node)
         if alias is not None:
