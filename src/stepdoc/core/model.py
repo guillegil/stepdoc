@@ -65,6 +65,9 @@ class Action:
     symbolic: bool = False
     """False when the source could not be found (SYM-5): render the concrete value."""
     location: Optional[Location] = None
+    read_expr: Optional[str] = field(default=None, repr=False, compare=False)
+    """For results: source of the expression that produced the value (``dat.txfe``),
+    so a check on the same line can tell which read is its checked value."""
 
     # Captured at event time, resolved lazily (cheap hot path).
     site: Optional[Site] = field(default=None, repr=False, compare=False)
@@ -89,6 +92,8 @@ class Action:
             return
         self.symbolic = True
         self.bound_to = res.bound_to
+        if self.direction == "out":
+            self.read_expr = res.node_source
         if self.direction != "out" and self.name is None:
             sym = res.select_value(self.value_from)
             if sym is not None:
@@ -130,7 +135,14 @@ class Check:
     """Set on unscoped checks only, like ``Action.section``."""
     symbolic_text: Optional[str] = None
     """Text for the procedure when it differs from ``text``: an adapter's check whose
-    expected value came from a name (``'Stored age' == <age>``)."""
+    expected value came from a name (``'Stored age' == <age>``) or whose checked
+    value is a register with variable parts (``dev.blk.reg<ch>.ready == 1``)."""
+    note: Optional[str] = None
+    """Words for the reader, shown after the check's text in parentheses: the
+    producer's ``note=``, else a source comment at ``location`` (CHK-9)."""
+    note_from_comment: bool = field(default=False, repr=False, compare=False)
+    """Look up ``note`` from a source comment when the recorder resolves (asserts
+    and adapters' checks set it; ``stepdoc_comment_notes = false`` turns it off)."""
 
 
 @dataclass

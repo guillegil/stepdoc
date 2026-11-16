@@ -147,8 +147,38 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 - **Notes.** `step("Calibrate", note="Offsets drift after power-up.")` (and
   `repeat(..., note=...)`) puts a sentence for the reader under the step's line,
   in the procedure and the report. A triple-quoted note is dedented.
-- **Reads inside checks.** A read on the same line as an `assert` is shown on the
-  check's line: `Verify dev.map.adc.value == 1024 -> got 1024`.
+- **Reads inside checks.** A read on the same line as an `assert` (or a
+  pytest-verifier check) is shown on the check's line:
+  `Verify dev.map.adc.value == 1024 -> got 1024`.
+- **Notes from comments.** A comment at the end of a check's line, or the comment
+  lines directly above it, is shown after the check in parentheses, in the
+  procedure and the report:
+
+  ```python
+  with step("Verify CMD FIFO flags at startup"):
+      # CMD FIFO empty
+      verify.equal(dat.txfe, 1)
+      verify.equal(dat.tx8e, 1, note="at least 8 empty positions")
+      assert ctl.tx == 0  # FIFO not full
+  ```
+
+  ```text
+  1. Verify CMD FIFO flags at startup
+     1.1. Verify dev.block.esmi<channel>_32dat.txfe == 1 (CMD FIFO empty)
+     1.2. Verify dev.block.esmi<channel>_32dat.tx8e == 1 (at least 8 empty positions)
+     1.3. Verify ctl.tx == 0 (FIFO not full)
+  ```
+
+  A verify check's `note=` wins over a comment. A blank line ends the block above,
+  and only comments indented like the check count (one that ends a deeper block
+  belongs to that block). `TODO`, `FIXME`, `noqa`, `type:`, `pragma`, `pylint:`,
+  `fmt:` and `isort:` markers, a tool directive after the note
+  (`# FIFO empty  # noqa: E501` gives `FIFO empty`), empty comments and
+  commented-out code (`# x = 2`, `# print(x)`) are skipped; labels such as
+  `# Expected: 1` are notes. Comments are read once per line at the end of each
+  test phase, never while it runs, so tools that read the steps when the test
+  ends (pytest-reporter) see them. Turn this off with
+  `stepdoc_comment_notes = false`.
 - **Quiet helpers.** `@step("Reset device", record=False)` keeps the step and its
   checks but drops the actions inside it.
 - **Naming a value.** `stepdoc.value("code", level * 2)` returns the value and shows
@@ -208,6 +238,7 @@ enable_assertion_pass_hook = true
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
 | `stepdoc_collapse_repeats` (ini) | Collapse polling, repeated writes and loops into one entry (default `true`) |
+| `stepdoc_comment_notes` (ini) | Show the comment on or above an `assert` or verify check as its note (default `true`) |
 | `stepdoc_adapters` (ini) | Adapters to run. Default: every adapter whose tool is installed. `-verify` leaves one out, `none` runs none |
 
 Without any of these options the plugin records nothing and prints nothing.
@@ -229,8 +260,17 @@ the plugin already publishes:
 
 - **pytest-verifier**: each `verify.*` check becomes a "Verify …" line in the
   step it was made in, taken from the `pytest_verify_results` hook. An expected
-  value given by name is symbolic in the procedure (`Verify 'Stored age' ==
-  <age>`) and concrete in the report (`== 30 -> got 31 ✗`).
+  value given by name is symbolic in the procedure (`Verify 'Stored age':
+  user["age"] == <age>`) and concrete in the report (`== 30 -> got 31 ✗`).
+  Comparisons, `between`, `is_true`, `is_false`, `is_none` and `is_not_none` start
+  with the checked value: a register read on the check's line is folded into it
+  and named by its target (`Verify dev.block.esmi<channel>_32dat.txfe == 1` in the
+  procedure, `dev.block.esmi3_32dat.txfe == 1 -> got 1 ✓` in the report),
+  otherwise the argument's source (`Verify write_count == 500`). A check made
+  without `name=` reads like that; with one, the name comes first:
+  `Verify 'FIFO not full': dev.block.esmi<channel>_ctl.tx == 0`. A literal
+  checked value keeps the old form (`Verify 'HTTP status' == 201`). The
+  check's `note=` is shown after it in parentheses.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.
@@ -294,5 +334,6 @@ uv sync
 uv run pytest
 uv run mypy
 uv run python bench/bench_events.py      # cost per recorded event
+uv run python bench/bench_verify_text.py # verify checks: recording, placing, resolving
 uv run --python 3.11 pytest              # any supported Python (3.9+)
 ```

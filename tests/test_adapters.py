@@ -151,16 +151,16 @@ def test_verify_checks_go_into_their_steps(verify_project):
         "      1.2.1. Verify 'Voltage' == <age * 0.055> V ± 0.05 V",
         "   1.3. Verify 'Stored name' == 'Ana'",
         "2. Check stored user",
-        "   2.1. Verify 'Stored age' == <age>",
+        "   2.1. Verify 'Stored age': user[\"age\"] == <age>",
         "3. Round 0",
-        "   3.1. Verify 'Round' == <i>",
+        "   3.1. Verify 'Round': i == <i>",
         "4. Round 1",
-        "   4.1. Verify 'Round' == <i>",
+        "   4.1. Verify 'Round': i == <i>",
     ]
     report = (verify_project.path / "report.txt").read_text()
     assert "1.2.1. Verify 'Voltage' == 1.65 V ± 0.05 V -> got 1.66   ✓" in report
     assert "2. Check stored user   ✗" in report
-    assert "2.1. Verify 'Stored age' == 30 -> got 31   ✗" in report
+    assert "2.1. Verify 'Stored age': user[\"age\"] == 30 -> got 31   ✗" in report
     assert "1. Create user   ✓" in report
 
 
@@ -184,7 +184,7 @@ def test_verify_checks_in_dry_run_are_not_judged(verify_project):
     run(verify_project, "--stepdoc-dry-run", "--stepdoc-record=run.json")
     user = json.loads((verify_project.path / "run.json").read_text())["tests"][0]
     check = user["steps"][1]["entries"][0]
-    assert check["text"] == "'Stored age' == 30" and check["passed"] is None
+    assert check["text"] == "'Stored age': user[\"age\"] == 30" and check["passed"] is None
 
 
 STEP_HOOKS = '''

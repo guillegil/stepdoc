@@ -24,6 +24,14 @@ def _code(text: str) -> str:
     return f"{fence}{pad}{text}{pad}{fence}"
 
 
+_PROSE = str.maketrans({c: "\\" + c for c in "\\`*_[]<>|"})
+
+
+def _prose(text: str) -> str:
+    """Plain words in Markdown: one line, characters that would format escaped."""
+    return " ".join(text.split()).translate(_PROSE)
+
+
 def _md_line(line: Line) -> str:
     indent = "  " * line.depth
     if line.is_step:
@@ -32,6 +40,8 @@ def _md_line(line: Line) -> str:
     else:
         num = f"{line.number}. " if line.number else ""
         parts = [num + " ".join(p for p in (line.verb, _code(line.code)) if p)]
+        if line.aside:
+            parts.append(f"({_prose(line.aside)})")
         if line.result:
             parts.append(f"→ {_code(line.result)}")
     if line.mark:

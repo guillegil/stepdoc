@@ -3,6 +3,37 @@
 ## Unreleased
 
 ### Added
+- Verify lines read like the code. pytest-verifier's comparisons (`equal`,
+  `not_equal`, `approx`, `greater`, `greater_equal`, `less`, `less_equal`),
+  `between`, `is_true`, `is_false`, `is_none` and `is_not_none` start with the
+  checked value: a register read made on the check's line is folded into the check
+  (as for `assert`, ACT-5) and names it, its variable parts symbolic in the
+  procedure (`Verify dev.block.esmi<channel>_32dat.txfe == 1`) and concrete in the
+  report (`dev.block.esmi3_32dat.txfe == 1 -> got 1 ✓`); without a read, the
+  argument's source as written, aliases not followed (`Verify write_count == 500`).
+  A check only takes a read of its own pass (a polled read feeds as many checks
+  as it stands for), so a loop over channels names each channel's register; a
+  bare variable bound to a single read is named after that read. Two checks of
+  one kind on one line each take their own argument and reads (told apart by the
+  automatic name; named ones keep the old text). A check made without `name=`
+  (descriptor `auto_name`) reads `<value> <op> <expected>`, one with a name
+  `'<name>': <value> <op> <expected>`. A literal checked value, or a call site
+  whose source cannot be read, keeps the old text (`'HTTP status' == 201`).
+- Check notes: `Check.note`, shown after the check's text in parentheses in the
+  procedure and the report (`Verify … == 1 (CMD FIFO empty)`; Markdown escapes it,
+  HTML shows it as text). The verify adapter takes pytest-verifier's `note`; without
+  one, and for plain `assert`s, the note is the comment at the end of the check's
+  first line, else the comment lines directly above it, indented like the check.
+  Markers (`TODO`, `FIXME`, `XXX`, `HACK`, `noqa`, `type:`, `pragma`, `pylint:`,
+  `fmt:`, `isort:`), also a directive after the note (`# note  # noqa: E501`),
+  empty comments and commented-out code are skipped; labels (`# Expected: 1`) and
+  keyword-led prose (`# return code`) are notes. Files are decoded by their PEP 263
+  coding cookie. Comments are read at the end of each test phase, once per file
+  and line, so pytest-reporter's `procedure.json` has them. The `stepdoc_comment_notes` ini setting (default `true`)
+  turns this off.
+- Run record schema 0.4: checks get an optional `note`.
+- `bench/bench_verify_text.py`: cost of recording, placing and resolving 10,000
+  verify checks, with comment notes on and off.
 - Variable parts of a target stay symbolic: a register reached with
   `getattr(obj, f"reg{ch}")` or `obj[i]`, directly or through a local alias
   (`reg = getattr(...)`, then `reg.value = val`), reads `dut.block.reg<ch>.value = <val>`
@@ -45,6 +76,15 @@
   with 0.1 to 0.3 still render.
 
 ### Changed
+- A pytest-verifier check with a name and a non-literal checked value now reads
+  `'Stored age': user["age"] == <age>` instead of `'Stored age' == <age>`.
+- Placing pytest-verifier's checks after a phase no longer grows with the square
+  of the number of steps and checks: 10,000 checks in 1,000 steps take about
+  0.2 s instead of minutes. Source lookups are cached per line.
+- Passing asserts in stepdoc's own code are no longer recorded as checks (pytest
+  rewrites an editable plugin's asserts; recording them recursed).
+- Passing asserts no longer keep a trailing comment in their text (some pytest
+  versions include it); it becomes the check's note.
 - The same write repeated from one source line, with the same value, collapses
   into one line, like polling: `Repeat dev.fifo.fifo_data = <cmd>`, and in the
   report `(16 times, 2 ms)`. Writes used to stay one line each.

@@ -7,9 +7,13 @@ stepdoc output option or ``--stepdoc-dry-run`` is passed (NFR-8).
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import sys
+import tokenize
 from pathlib import Path
+from types import FrameType
 from typing import Any, Generator, Optional
 
 import pytest
@@ -36,6 +40,7 @@ class _State:
         self.active = bool(self.record_path or self.procedure_path or self.report_path or self.dry_run)
         self.root = str(config.rootpath)
         self.collapse_repeats: bool = config.getini("stepdoc_collapse_repeats")
+        self.comment_notes: bool = config.getini("stepdoc_comment_notes")
         self.cases: list[dict[str, Any]] = []
         # pytest-xdist (PAR-1): workers record, the controller merges and writes.
         self.worker = hasattr(config, "workerinput")
@@ -63,6 +68,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                        "(drivers, clients, bridges' libraries)")
     parser.addini("stepdoc_collapse_repeats", type="bool", default=True,
                   help="collapse polling, repeated writes and loop passes into one entry")
+    parser.addini("stepdoc_comment_notes", type="bool", default=True,
+                  help="take a check's note from the comment on or above its line "
+                       "when it has no note= (asserts and adapters' checks)")
     parser.addini("stepdoc_adapters", type="linelist", default=[],
                   help="adapters to run (default: every adapter whose tool is installed); "
                        "'-name' leaves one out, 'none' runs none")
@@ -126,7 +134,12 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
     state: _State = item.config.stash[_state_key]
     if not state.active:
         return (yield)
-    rec = Recorder(item.nodeid, dry_run=state.dry_run, collapse_repeats=state.collapse_repeats)
+    rec = Recorder(
+        item.nodeid,
+        dry_run=state.dry_run,
+        collapse_repeats=state.collapse_repeats,
+        comment_notes=state.comment_notes,
+    )
     item.stash[_recorder_key] = rec
 
     def notify(event: str, s: Step) -> None:
@@ -184,7 +197,11 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: Optional[pytest.Item]) 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Generator[None, Any, Any]:
     report = yield
-    if _recorder_key in item.stash:
+    rec = item.stash.get(_recorder_key, None)
+    if rec is not None:
+        # CHK-9: comment notes before the phase's report is logged, so tools that
+        # read the steps at pytest_runtest_logfinish see them.
+        rec.resolve_notes()
         current = item.stash.get(_outcome_key, None)
         if report.skipped:
             outcome = "skipped"
@@ -203,9 +220,45 @@ def pytest_assertion_pass(item: pytest.Item, lineno: int, orig: str, expl: str) 
     """CHK-4: passing ``assert`` statements become checks. Needs the
     ``enable_assertion_pass_hook`` ini option."""
     rec = current_recorder()
-    if rec is None or _recorder_key not in item.stash:
+    if rec is None or _recorder_key not in item.stash or _asserted_by_stepdoc():
         return
-    rec.add_check(Check(text=orig, passed=True, location=Location(str(item.path), lineno)))
+    check = Check(text=_code_only(orig), passed=True, location=Location(str(item.path), lineno))
+    check.note_from_comment = True
+    rec.add_check(check)
+
+
+_PACKAGE = os.path.dirname(os.path.abspath(__file__)) + os.sep
+
+
+def _asserted_by_stepdoc() -> bool:
+    """True for an ``assert`` in stepdoc's own code. pytest rewrites the asserts
+    of plugins installed in editable mode too, and recording one of them as a
+    check would record stepdoc's internals (and recurse while adding it)."""
+    f: Optional[FrameType] = sys._getframe(2)
+    for _ in range(16):
+        if f is None:
+            return False
+        if f.f_code.co_name == "_call_assertion_pass":
+            caller = f.f_back
+            return caller is not None and os.path.abspath(caller.f_code.co_filename).startswith(_PACKAGE)
+        f = f.f_back
+    return False
+
+
+def _code_only(source: str) -> str:
+    """An assert's source without the comments pytest keeps in it on some versions
+    (they become the check's note, CHK-9)."""
+    if "#" not in source:
+        return source
+    try:
+        tokens = [t for t in tokenize.generate_tokens(io.StringIO(source).readline) if t.type == tokenize.COMMENT]
+    except (tokenize.TokenError, SyntaxError):
+        return source
+    lines = source.splitlines()
+    for t in reversed(tokens):
+        row, col = t.start
+        lines[row - 1] = lines[row - 1][:col].rstrip()
+    return "\n".join(line for line in lines if line.strip()) or source
 
 
 @pytest.hookimpl(optionalhook=True)

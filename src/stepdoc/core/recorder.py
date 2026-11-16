@@ -10,7 +10,7 @@ import sys
 import time
 from contextvars import ContextVar
 from types import TracebackType
-from typing import Any, Callable, Iterator, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Collection, Iterator, Optional, Sequence, TypeVar, Union
 
 from .model import (
     DEFAULT_DIRECTIONS,
@@ -27,6 +27,7 @@ from .model import (
     combine,
 )
 from .redaction import _SCALARS, redact, redact_text
+from .comments import comment_note
 from .symbolic import assert_source, capture
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -53,11 +54,15 @@ class Recorder:
         symbolic: bool = True,
         dry_run: bool = False,
         collapse_repeats: bool = True,
+        comment_notes: bool = True,
     ) -> None:
         self.name = name
         self.symbolic = symbolic
         self.dry_run = dry_run
         self.collapse_repeats = collapse_repeats
+        self.comment_notes = comment_notes
+        """Take a check's note from the source comment at its line when it has none
+        (CHK-9); looked up in :meth:`resolve`, after the test."""
         self.section: Section = "procedure"
         """Phase new top-level steps and unscoped entries belong to (STEP-8). The
         pytest plugin sets it around fixture setup and teardown."""
@@ -130,6 +135,7 @@ class Recorder:
                 text = source or _assert_text(exc)
                 passed: Optional[bool] = None if self.dry_run else False
                 check = Check(text=text, passed=passed, detail=message, location=_tb_location(exc))
+                check.note_from_comment = True
                 self._attach(s, check)
                 own.append("failed")
                 swallow = self.dry_run
@@ -299,26 +305,51 @@ class Recorder:
         s.status = "unknown" if self.dry_run else check_status(check)
         return s
 
-    def insert_check(self, path: Sequence[Step], check: Check, index: Optional[int] = None) -> None:
+    def insert_check(
+        self,
+        path: Sequence[Step],
+        check: Check,
+        index: Optional[int] = None,
+        *,
+        fold: Optional[tuple[int, int]] = None,
+        start: int = 0,
+        fold_exprs: Optional[Collection[str]] = None,
+    ) -> int:
         """Add ``check`` to a step that may have finished already, for checks that
         arrive after the fact (an adapter reading another tool's results). ``path``
         runs from a top-level step down to the target step; an empty path means the
         unscoped section. The check goes at ``index`` among the step's entries (the
         end by default), entries are renumbered, and the statuses along ``path``
-        take the check's result into account."""
+        take the check's result into account.
+
+        ``fold`` (first and last source line of the call that made the check)
+        absorbs the reads that fed it, as for an ``assert`` (ACT-5): the first run
+        of results recorded on those lines of the check's file, between ``start``
+        and ``index``, moves into ``check.reads`` and the check takes its place. A
+        run holds each read expression once, so in a loop each pass's check takes
+        its own pass's reads. With ``fold_exprs`` (the expressions in the call),
+        a read whose source expression is known must be one of them, so two
+        checks on one line take their own reads. Returns the index the check ends
+        up at."""
         if self.dry_run:
             _unjudge(check)
         if not path:
             self._flush(None)
             check.section = check.section or self.section
-            self.unscoped.append(check)
-            return
-        target = path[-1]
-        target.entries.insert(len(target.entries) if index is None else index, check)
-        _renumber(target)
+            entries: list[Any] = self.unscoped
+        else:
+            entries = path[-1].entries
+        at = len(entries) if index is None else min(index, len(entries))
+        if fold is not None and check.location is not None:
+            at = _fold_reads(entries, max(start, 0), at, check, fold, fold_exprs)
+        entries.insert(at, check)
+        if not path:
+            return at
+        _renumber(path[-1], at)
         if not self.dry_run:
             for s in path:
                 s.status = combine([s.status, check_status(check)])
+        return at
 
     def mark_unknown(self) -> None:
         """NFR-7: a judge stepdoc cannot see ran in this test, so no step can be
@@ -342,6 +373,33 @@ class Recorder:
         self._flush(None)
         for a in self.iter_actions():
             a.resolve()
+        self.resolve_notes()
+
+    def resolve_notes(self) -> None:
+        """Give checks waiting for one the note of the source comment at their line
+        (CHK-9). Cheap and idempotent: comments are read once per file and line.
+        The pytest plugin calls it at the end of each test phase, so tools that
+        read the steps when the test ends (pytest-reporter) see the notes."""
+        if not self.comment_notes:
+            return
+        for c in self.iter_checks():
+            if c.note_from_comment:
+                c.note_from_comment = False
+                if c.note is None and c.location is not None:
+                    c.note = comment_note(c.location.file, c.location.line)
+
+    def iter_checks(self) -> Iterator[Check]:
+        """Every check, in steps, repeats and the unscoped section (not children)."""
+
+        def walk(entries: Sequence[Any]) -> Iterator[Check]:
+            for e in entries:
+                if isinstance(e, Check):
+                    yield e
+                elif isinstance(e, (Step, Repeat)):
+                    yield from walk(e.entries)
+
+        yield from walk(self.unscoped)
+        yield from walk(self.steps)
 
     def iter_actions(self) -> Iterator[Action]:
         def walk(entries: Sequence[Any]) -> Iterator[Action]:
@@ -489,6 +547,48 @@ def _action_line(a: Action) -> Optional[tuple[str, int]]:
     return None
 
 
+def _fold_reads(
+    entries: list[Any],
+    start: int,
+    end: int,
+    check: Check,
+    fold: tuple[int, int],
+    exprs: Optional[Collection[str]] = None,
+) -> int:
+    """Move the first run of results in ``entries[start:end]`` made on the lines
+    ``fold`` of the check's file into ``check.reads``; returns where the check
+    goes: where the run was, else ``end``."""
+    loc = check.location
+    assert loc is not None
+
+    def feeds(e: Any) -> bool:
+        if not isinstance(e, Action) or e.direction != "out":
+            return False
+        if exprs is not None and e.read_expr is not None and e.read_expr not in exprs:
+            return False
+        where = _action_line(e)
+        return where is not None and fold[0] <= where[1] <= fold[1] and _same_file(where[0], loc.file)
+
+    first = next((i for i in range(start, end) if feeds(entries[i])), None)
+    if first is None:
+        return end
+    last = first
+    seen: set[str] = set()
+    while last < end and feeds(entries[last]):
+        key = entries[last].read_expr or entries[last].target
+        if key in seen:  # the next pass of a loop
+            break
+        seen.add(key)
+        last += 1
+    reads = entries[first:last]
+    del entries[first:last]
+    for a in reads:
+        a.number = None
+        a.section = None
+    check.reads = [*reads, *check.reads]
+    return first
+
+
 def _feeds(a: Action, loc: Location) -> bool:
     if a.direction != "out":
         return False
@@ -514,9 +614,11 @@ def _tb_location(exc: BaseException) -> Optional[Location]:
     return Location(tb.tb_frame.f_code.co_filename, tb.tb_lineno)
 
 
-def _renumber(s: Union[Step, Repeat]) -> None:
-    for i, e in enumerate(s.entries, 1):
-        e.number = None if s.number is None else f"{s.number}.{i}"
+def _renumber(s: Union[Step, Repeat], start: int = 0) -> None:
+    """Number the entries of ``s`` from ``entries[start]`` on (and their children)."""
+    for i in range(max(start, 0), len(s.entries)):
+        e = s.entries[i]
+        e.number = None if s.number is None else f"{s.number}.{i + 1}"
         if isinstance(e, (Step, Repeat)):
             _renumber(e)
 
