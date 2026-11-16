@@ -100,7 +100,28 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 - **Polling.** The same read (or the same request) repeated from one source line,
   such as `while not dev.map.status.pll_locked: ...`, becomes one line:
   `Poll dev.map.status.pll_locked`, and in the report `-> True (37 reads, 18 ms)`.
-  Turn it off with `stepdoc_collapse_repeats = false`.
+  The same write repeated from one line becomes `Repeat dev.fifo.fifo_data = <cmd>`,
+  and in the report `-> (16 times, 2 ms)`.
+- **Loops.** When the same group of actions comes back to back (the body of a
+  `for` or `while` loop, up to 8 actions per pass), the passes become one entry,
+  with one pass inside it; the report adds how many passes ran:
+
+  ```text
+  1. Empty FIFO
+     1.1. Repeat                                      (report: 16 times, 3 ms)
+        1.1.1. Read dev.fifo.status.empty
+        1.1.2. dev.fifo.fifo_data = <read_command>
+     1.2. Read dev.fifo.status.empty                  (the test that ended the loop)
+  ```
+
+  Passing checks made in every pass are part of it. A pass that does something
+  else (a failed check, another value written) ends the loop and is shown as it
+  ran, after it. Wrap the loop in `with stepdoc.repeat(until="FIFO is empty"):` to
+  say what it waits for: the entry reads `Repeat until FIFO is empty`, the last
+  test of the condition belongs to it, and actions before and after the block
+  never join the loop. The title is always written by hand: stepdoc does not turn
+  `while not fifo_empty` into words.
+  Turn all of this off with `stepdoc_collapse_repeats = false`.
 - **Reads inside checks.** A read on the same line as an `assert` is shown on the
   check's line: `Verify dev.map.adc.value == 1024 -> got 1024`.
 - **Quiet helpers.** `@step("Reset device", record=False)` keeps the step and its
@@ -161,7 +182,7 @@ enable_assertion_pass_hook = true
 | `--stepdoc-report=PATH` | Write the executed report, same formats |
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
-| `stepdoc_collapse_repeats` (ini) | Collapse polling into one line (default `true`) |
+| `stepdoc_collapse_repeats` (ini) | Collapse polling, repeated writes and loops into one entry (default `true`) |
 | `stepdoc_adapters` (ini) | Adapters to run. Default: every adapter whose tool is installed. `-verify` leaves one out, `none` runs none |
 
 Without any of these options the plugin records nothing and prints nothing.

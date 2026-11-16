@@ -81,13 +81,10 @@ def action_line(a: Record, symbolic: bool, depth: int) -> Line:
 
     op = a["op"]
     count = a.get("count", 1)
-    if count > 1:  # ACT-4: a polling loop, one line
+    if count > 1 and direction != "in":  # ACT-4: a polling loop, one line
         if not symbolic:
             noun = "reads" if direction == "out" else "calls"
-            spent = ""
-            if a.get("t_last") is not None and a.get("t") is not None:
-                spent = f", {(a['t_last'] - a['t']) * 1000:.0f} ms"
-            result = f"{result} ({count} {noun}{spent})" if result else f"({count} {noun}{spent})"
+            result = _times(result, count, noun, a)
         code = f"{target}  {value}".rstrip() if op in _BARE_OPS else f"{target} {value}".rstrip()
         return Line(a.get("number"), "Poll", code, result, note=note, depth=depth)
     if direction == "in" and op in _ASSIGN_OPS:
@@ -96,7 +93,30 @@ def action_line(a: Record, symbolic: bool, depth: int) -> Line:
         verb, code = "", f"{target}  {value}".rstrip()
     else:
         verb, code = op.capitalize(), f"{target} {value}".rstrip()
+    if count > 1:  # the same write again, from one line (a loop)
+        verb = f"Repeat {verb.lower()}".rstrip()
+        if not symbolic:
+            result = _times(result, count, "times", a)
     return Line(a.get("number"), verb, code, result, note=note, depth=depth)
+
+
+def _times(result: Optional[str], count: int, noun: str, e: Record) -> str:
+    spent = ""
+    if e.get("t_last") is not None and e.get("t") is not None:
+        spent = f", {(e['t_last'] - e['t']) * 1000:.0f} ms"
+    return f"{result} ({count} {noun}{spent})" if result else f"({count} {noun}{spent})"
+
+
+def repeat_line(r: Record, symbolic: bool, depth: int) -> Line:
+    """ACT-10: ``Repeat until FIFO is empty``; the report adds how often."""
+    verb = f"Repeat until {r['until']}" if r.get("until") else "Repeat"
+    note = None
+    count = r.get("count")
+    if not symbolic and count is not None:
+        note = "once" if count == 1 else f"{count} times"
+        if count > 1 and r.get("t_last") is not None and r.get("t") is not None:
+            note += f", {(r['t_last'] - r['t']) * 1000:.0f} ms"
+    return Line(r.get("number"), verb, "", note=note, depth=depth)
 
 
 def check_line(c: Record, symbolic: bool, depth: int) -> Line:
@@ -125,6 +145,9 @@ def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[L
         kind = e["type"]
         if kind == "step":
             yield from step_lines(e, symbolic, depth)
+        elif kind == "repeat":
+            yield repeat_line(e, symbolic, depth)
+            yield from entry_lines(e["entries"], symbolic, depth + 1)
         elif kind == "check":
             yield check_line(e, symbolic, depth)
             for child in e.get("children") or []:

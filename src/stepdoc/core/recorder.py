@@ -17,6 +17,7 @@ from .model import (
     Check,
     Direction,
     Location,
+    Repeat,
     Section,
     Status,
     Step,
@@ -62,11 +63,13 @@ class Recorder:
         self.started_at = time.time()
         self.ended: Optional[float] = None
         self.steps: list[Step] = []
-        self.unscoped: list[Union[Action, Check]] = []  # ACT-3
+        self.unscoped: list[Union[Action, Check, Repeat]] = []  # ACT-3
         self._stack: list[Step] = []
         self._tokens: list[Any] = []
         self._quiet = 0
         self._names: list[tuple[str, Any]] = []
+        self._floors: dict[int, int] = {}
+        """id(container) -> index before which ``repeat()`` blocks collapsing."""
         self.listeners: list[Listener] = []
 
     # Activation ----------------------------------------------------------- #
@@ -75,6 +78,7 @@ class Recorder:
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        self._flush(None)
         self.ended = _perf()
         _current.reset(self._tokens.pop())
 
@@ -87,6 +91,7 @@ class Recorder:
 
     def _open(self, title: str, location: Optional[Location]) -> Step:
         parent = self._stack[-1] if self._stack else None
+        self._flush(parent)
         section = self.section if parent is None else parent.section
         s = Step(
             number=self._number_in(parent),
@@ -109,6 +114,7 @@ class Recorder:
 
     def _close(self, s: Step, exc: Optional[BaseException]) -> bool:
         """Close ``s``; returns True when ``exc`` must be swallowed (dry-run only)."""
+        self._flush(s)
         s.ended = _perf()
         if self._stack and self._stack[-1] is s:
             self._stack.pop()
@@ -137,7 +143,7 @@ class Recorder:
         return self._stack[-1] if self._stack else None
 
     # Entries -------------------------------------------------------------- #
-    def _add_to(self, s: Optional[Step], entry: Union[Action, Check]) -> None:
+    def _add_to(self, s: Optional[Step], entry: Union[Action, Check, Repeat]) -> None:
         if s is None:
             entry.section = self.section
             self.unscoped.append(entry)
@@ -150,16 +156,86 @@ class Recorder:
 
     def add_action(self, action: Action) -> None:
         s = self.current_step
-        if self.collapse_repeats:
-            entries = self._container(s)
-            if entries and _is_repeat(entries[-1], action):
-                last: Action = entries[-1]
-                last.count += 1
-                last.t_last = action.t
-                last.value = action.value
-                last.meta = action.meta
+        if not self.collapse_repeats:
+            self._add_to(s, action)
+            return
+        entries = self._container(s)
+        floor = self._floors.get(id(entries), 0)
+        if len(entries) > floor:
+            last = entries[-1]
+            if isinstance(last, Repeat) and last.partial is not None:
+                if _continue(last, action):
+                    return
+                self._flush(s)
+                last = entries[-1]
+            if _is_repeat(last, action):  # ACT-4: polling, or the same write again
+                _absorb(last, action)
                 return
         self._add_to(s, action)
+        self._fold(s, entries, floor)
+
+    def _fold(self, s: Optional[Step], entries: list[Any], floor: int) -> None:
+        """ACT-10: when the last ``2p`` entries are the same ``p`` actions twice, they
+        become a ``Repeat`` that later passes of the loop add to."""
+        n = len(entries)
+        new = entries[-1]
+        for p in range(2, _MAX_PASS + 1):
+            if n - 2 * p < floor:
+                return
+            if not _same_event(entries[n - 1 - p], new):
+                continue
+            first, second = entries[n - 2 * p : n - p], entries[n - p :]
+            if all(map(_same_event, first, second)):
+                for a, b in zip(first, second):
+                    _take_values(a, b)
+                rep = Repeat(entries=first, count=2, t=_entry_time(first[0]), t_last=_end_time(second[-1]), partial=[])
+                del entries[n - 2 * p :]
+                self._add_to(s, rep)
+                _renumber(rep)
+                return
+
+    def _flush(self, s: Optional[Step]) -> None:
+        """Close the loop being collapsed at the end of ``s``: the actions of an
+        unfinished pass become ordinary entries after it."""
+        entries = self._container(s)
+        if not entries:
+            return
+        last = entries[-1]
+        if isinstance(last, Repeat) and last.partial is not None:
+            partial, last.partial = last.partial, None
+            for e in partial:
+                if isinstance(e, Check):  # its reads are the actions just added
+                    del entries[len(entries) - len(e.reads) :]
+                self._add_to(s, e)
+
+    def _close_repeat(self, s: Optional[Step], start: int, until: Optional[str], clean: bool) -> None:
+        """End of a ``repeat()`` block whose entries start at ``start``."""
+        self._flush(s)
+        entries = self._container(s)
+        region = entries[start:]
+        rest: list[Any] = []
+        if not region:
+            rep = Repeat(entries=[], count=0, t=_perf(), until=until)
+        else:
+            head, rest = region[0], region[1:]
+            if isinstance(head, Repeat) and head.until is None:
+                rep = head
+            elif isinstance(head, Action) and (head.count > 1 or not rest):
+                rep = Repeat(entries=[head], count=head.count, t=head.t, t_last=head.t_last)
+                head.count, head.t_last = 1, None
+            else:
+                rep, rest = Repeat(entries=region, count=None, t=_entry_time(head)), []
+            rep.until = until
+            if clean and rep.count is not None and _is_prefix(rest, rep.entries):
+                # The last test of a ``while`` condition: part of the loop, not a pass.
+                for a, b in zip(rep.entries, rest):
+                    _take_values(a, b)
+                rest = []
+        entries[start:] = [rep, *rest]
+        if s is None:
+            rep.section = self.section
+        else:
+            _renumber(s)
 
     def add_check(self, check: Check) -> None:
         self._attach(self.current_step, check)
@@ -169,9 +245,27 @@ class Recorder:
         actions at the end of the step that ran on the check's source line."""
         if self.dry_run:
             _unjudge(check)
+        entries = self._container(s)
         loc = check.location
+        floor = self._floors.get(id(entries), 0)
+        last = entries[-1] if len(entries) > floor else None
+        if isinstance(last, Repeat) and last.partial is not None:
+            # A check made in every pass of a loop (a passing assert) is part of it.
+            partial = last.partial
+            n = 0
+            if loc is not None:
+                while (
+                    n < len(partial)
+                    and isinstance(partial[-1 - n], Action)
+                    and _feeds(partial[-1 - n], loc)
+                ):
+                    n += 1
+            check.reads = list(partial[len(partial) - n :])
+            if _continue(last, check):
+                return
+            check.reads = []
+            self._flush(s)
         if loc is not None:
-            entries = self._container(s)
             reads: list[Action] = []
             while entries and isinstance(entries[-1], Action) and _feeds(entries[-1], loc):
                 reads.append(entries.pop())
@@ -180,6 +274,8 @@ class Recorder:
                 a.section = None
             check.reads = reads[::-1]
         self._add_to(s, check)
+        if self.collapse_repeats:
+            self._fold(s, entries, floor)
 
     def add_leaf(self, title: str, check: Check, location: Optional[Location]) -> Step:
         """STEP-3: a one-line step holding a single check."""
@@ -202,6 +298,7 @@ class Recorder:
         if self.dry_run:
             _unjudge(check)
         if not path:
+            self._flush(None)
             check.section = check.section or self.section
             self.unscoped.append(check)
             return
@@ -216,11 +313,14 @@ class Recorder:
         """NFR-7: a judge stepdoc cannot see ran in this test, so no step can be
         shown as passed. Failed and errored steps keep their status."""
 
-        def walk(steps: Sequence[Step]) -> None:
+        def walk(steps: Sequence[Union[Step, Repeat]]) -> None:
             for s in steps:
+                if isinstance(s, Repeat):
+                    walk([e for e in s.entries if isinstance(e, (Step, Repeat))])
+                    continue
                 if s.status == "passed":
                     s.status = "unknown"
-                walk(s.children)
+                walk([e for e in s.entries if isinstance(e, (Step, Repeat))])
 
         walk(self.steps)
 
@@ -228,6 +328,7 @@ class Recorder:
     def resolve(self) -> None:
         """Resolve every captured site into symbolic text (call before the source
         files can change, e.g. at test teardown)."""
+        self._flush(None)
         for a in self.iter_actions():
             a.resolve()
 
@@ -238,7 +339,7 @@ class Recorder:
                     yield e
                 elif isinstance(e, Check):
                     yield from e.reads
-                elif isinstance(e, Step):
+                elif isinstance(e, (Step, Repeat)):
                     yield from walk(e.entries)
 
         yield from walk(self.unscoped)
@@ -250,30 +351,123 @@ class Recorder:
         if self.dry_run:
             return "unknown"
         statuses = [s.status for s in self.steps]
-        statuses += [check_status(c) for c in self.unscoped if isinstance(c, Check)]
+        statuses += [_entry_status(e) for e in self.unscoped if not isinstance(e, Action)]
         return combine(statuses) if statuses else "unknown"
 
 
 _SECTION_PREFIX: dict[Section, str] = {"setup": "S", "procedure": "", "teardown": "T"}
 
 
-def _is_repeat(last: Any, new: Action) -> bool:
-    """ACT-4: the same result-producing event again, from the same code location
-    (a polling loop), e.g. a status register or a job-status endpoint."""
-    if not isinstance(last, Action) or new.direction == "in":
+_MAX_PASS = 8
+"""Longest loop body, in actions, that collapses on its own (ACT-10)."""
+
+
+def _same_event(a: Any, b: Any) -> bool:
+    """The same action from the same code: same op and target, and for writes and
+    requests the same value (reads may return anything). For checks: the same
+    check from the same line, passed (or not judged) both times."""
+    if type(a) is Check and type(b) is Check:
+        return (
+            a.text == b.text
+            and a.location == b.location
+            and a.passed is not False
+            and a.passed == b.passed
+            and not a.children
+            and not b.children
+            and len(a.reads) == len(b.reads)
+            and all(map(_same_event, a.reads, b.reads))
+        )
+    if type(a) is not Action or type(b) is not Action:
         return False
-    if (last.op, last.target, last.direction) != (new.op, new.target, new.direction):
+    if (a.op, a.target, a.direction, a.name) != (b.op, b.target, b.direction, b.name):
         return False
-    if last.site is not None and new.site is not None:
+    if a.site is not None and b.site is not None:
         # Same line, not same instruction: a ``while`` condition compiles twice.
-        if (last.site.code, last.site.lineno) != (new.site.code, new.site.lineno):
+        if (a.site.code, a.site.lineno) != (b.site.code, b.site.lineno):
             return False
-    if new.direction == "exchange":
+    if b.direction != "out":
         try:
-            return bool(last.value == new.value)
+            return bool(a.value == b.value)
         except Exception:
             return False
     return True
+
+
+def _is_repeat(last: Any, new: Action) -> bool:
+    """ACT-4: the same event again, from the same code location: a polling loop
+    (a status register, a job-status endpoint) or the same write in a loop."""
+    return _same_event(last, new)
+
+
+def _absorb(last: Action, new: Action) -> None:
+    last.count += 1
+    last.t_last = new.t
+    _take_values(last, new)
+
+
+def _take_values(kept: Any, new: Any) -> None:
+    """A collapsed entry shows the values of the latest event."""
+    if isinstance(kept, Check):
+        kept.actual, kept.expected, kept.detail = new.actual, new.expected, new.detail
+        for a, b in zip(kept.reads, new.reads):
+            _take_values(a, b)
+        return
+    kept.value = new.value
+    kept.meta = new.meta
+
+
+def _flat(entries: Sequence[Any]) -> list[Any]:
+    """One pass as it is recorded: each check after the reads that fed it."""
+    out: list[Any] = []
+    for e in entries:
+        if isinstance(e, Check):
+            out.extend(e.reads)
+        out.append(e)
+    return out
+
+
+def _continue(rep: Repeat, new: Union[Action, Check]) -> bool:
+    """Add ``new`` to the pass in progress of ``rep`` if it is what the loop body
+    does next (ACT-10); polling inside a pass stays one entry."""
+    partial = rep.partial
+    assert partial is not None
+    if partial and isinstance(new, Action) and _same_event(partial[-1], new):
+        _absorb(partial[-1], new)
+        return True
+    body: list[Any] = _flat(rep.entries)
+    pos = len(partial)
+    if pos < len(body) and _same_event(body[pos], new):
+        partial.append(new)
+        if len(partial) == len(body):
+            for kept, new_value in zip(body, partial):
+                if isinstance(kept, Check):  # its reads are separate items of the pass
+                    kept.actual, kept.expected = new_value.actual, new_value.expected
+                    kept.detail = new_value.detail
+                else:
+                    _take_values(kept, new_value)
+            rep.count = (rep.count or 0) + 1
+            rep.t_last = _end_time(new)
+            rep.partial = []
+        return True
+    return False
+
+
+def _is_prefix(rest: Sequence[Any], body: Sequence[Any]) -> bool:
+    return 0 < len(rest) < len(body) and all(map(_same_event, body, rest))
+
+
+def _entry_time(e: Any) -> float:
+    if isinstance(e, Step):
+        return e.started
+    if isinstance(e, Check):
+        return e.reads[0].t if e.reads else _perf()
+    return float(e.t)
+
+
+def _end_time(e: Any) -> float:
+    if isinstance(e, Action):
+        return e.t_last if e.t_last is not None else e.t
+    return _perf()
 
 
 def _action_line(a: Action) -> Optional[tuple[str, int]]:
@@ -309,15 +503,19 @@ def _tb_location(exc: BaseException) -> Optional[Location]:
     return Location(tb.tb_frame.f_code.co_filename, tb.tb_lineno)
 
 
-def _renumber(s: Step) -> None:
+def _renumber(s: Union[Step, Repeat]) -> None:
     for i, e in enumerate(s.entries, 1):
-        e.number = f"{s.number}.{i}"
-        if isinstance(e, Step):
+        e.number = None if s.number is None else f"{s.number}.{i}"
+        if isinstance(e, (Step, Repeat)):
             _renumber(e)
 
 
-def _entry_status(e: Union[Check, Step]) -> Status:
-    return check_status(e) if isinstance(e, Check) else e.status
+def _entry_status(e: Union[Check, Repeat, Step]) -> Status:
+    if isinstance(e, Check):
+        return check_status(e)
+    if isinstance(e, Repeat):
+        return combine([_entry_status(x) for x in e.entries if not isinstance(x, Action)])
+    return e.status
 
 
 def _unjudge(c: Check) -> None:
@@ -477,6 +675,55 @@ class step:  # noqa: N801 - public API name from the brief
                 return fn(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]
+
+
+class repeat:  # noqa: N801 - reads like ``step``
+    """``with repeat(until="FIFO is empty"):`` around a loop (ACT-10).
+
+    Loops collapse on their own: when the same actions come back to back, the
+    passes become one ``Repeat`` entry with a count. This block only says what the
+    loop waits for, and keeps the actions recorded before and after it out of the
+    loop. It records one entry, ``Repeat until FIFO is empty``, whose children are
+    one pass. The last test of a ``while`` condition (a pass cut short where the
+    loop ended) is part of the entry; a pass that differs, such as the one where
+    an exception was raised, follows it as ordinary entries.
+    """
+
+    def __init__(self, until: Optional[str] = None) -> None:
+        self.until = until
+        self._rec: Optional[Recorder] = None
+        self._step: Optional[Step] = None
+        self._start = 0
+        self._saved: Optional[int] = None
+
+    def __enter__(self) -> None:
+        rec = _current.get()
+        if rec is None or rec._quiet:
+            return None
+        self._rec = rec
+        self._step = rec.current_step
+        rec._flush(self._step)
+        entries = rec._container(self._step)
+        self._start = len(entries)
+        self._saved = rec._floors.get(id(entries))
+        rec._floors[id(entries)] = self._start
+        return None
+
+    def __exit__(
+        self,
+        et: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
+        rec = self._rec
+        if rec is None:
+            return
+        entries = rec._container(self._step)
+        if self._saved is None:
+            rec._floors.pop(id(entries), None)
+        else:
+            rec._floors[id(entries)] = self._saved
+        rec._close_repeat(self._step, self._start, self.until, clean=exc is None)
 
 
 # (code, offset of the call) -> whether its result is discarded (STEP-9).

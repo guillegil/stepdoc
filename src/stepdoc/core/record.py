@@ -17,12 +17,12 @@ import platform
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Union
 
-from .model import Action, Check, Location, Step
+from .model import Action, Check, Location, Repeat, Step
 from .recorder import Recorder
 
-SCHEMA_ID = "urn:stepdoc:schema:run-record:0.3"  # no published URL yet
-SCHEMA_VERSION = "0.3"
-READABLE_VERSIONS = ("0.1", "0.2", "0.3")
+SCHEMA_ID = "urn:stepdoc:schema:run-record:0.4"  # no published URL yet
+SCHEMA_VERSION = "0.4"
+READABLE_VERSIONS = ("0.1", "0.2", "0.3", "0.4")
 """Each version only adds fields; renderers read older records too."""
 
 
@@ -137,9 +137,25 @@ def _step(s: Step, ctx: _Ctx) -> dict[str, Any]:
     }
 
 
-def _entry(e: Union[Action, Check, Step], ctx: _Ctx) -> dict[str, Any]:
+def _repeat(r: Repeat, ctx: _Ctx) -> dict[str, Any]:
+    return {
+        "type": "repeat",
+        "number": r.number,
+        "until": r.until,
+        "count": r.count,
+        "t": ctx.t(r.t),
+        "t_last": ctx.t(r.t_last),
+        "location": ctx.loc(r.location),
+        "entries": [_entry(e, ctx) for e in r.entries],
+        **_section(r.section),
+    }
+
+
+def _entry(e: Union[Action, Check, Repeat, Step], ctx: _Ctx) -> dict[str, Any]:
     if isinstance(e, Step):
         return _step(e, ctx)
+    if isinstance(e, Repeat):
+        return _repeat(e, ctx)
     if isinstance(e, Check):
         return _check(e, ctx)
     return _action(e, ctx)
