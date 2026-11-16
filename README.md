@@ -101,7 +101,15 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
   such as `while not dev.map.status.pll_locked: ...`, becomes one line:
   `Poll dev.map.status.pll_locked`, and in the report `-> True (37 reads, 18 ms)`.
   The same write repeated from one line becomes `Repeat dev.fifo.fifo_data = <cmd>`,
-  and in the report `-> (16 times, 2 ms)`.
+  and in the report `-> (16 times, 2 ms)`. The values may differ: a loop writing
+  `dev.fifo.data = i` is still one line, `dev.fifo.data = <i>` in the procedure and
+  `Repeat dev.fifo.data = 0, 1, … 15 -> (16 times, 2 ms)` in the report (all the
+  values up to four, else the first two and the last). "One line" means the same
+  statement reached through the same calls: a write inside your own helper counts
+  by the line that called the helper, so `set_mode(dev, 1)` and `set_mode(dev, 2)`
+  on two lines, or `dev.x = 1; dev.x = 2` on one, stay two lines. The run record keeps every
+  value (the first and last 32 of a longer loop). Without the source line (a
+  recorder with `symbolic=False`), only writes of the same value collapse.
 - **Loops.** When the same group of actions comes back to back (the body of a
   `for` or `while` loop, up to 8 actions per pass), the passes become one entry,
   with one pass inside it; the report adds how many passes ran:
@@ -114,9 +122,13 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
      1.2. Read dev.fifo.status.empty                  (the test that ended the loop)
   ```
 
-  Passing checks made in every pass are part of it. A pass that does something
-  else (a failed check, another value written) ends the loop and is shown as it
-  ran, after it. Wrap the loop in `stepdoc.repeat(...)` to say what it does and
+  Passing checks made in every pass are part of it. A write from the same line
+  counts as the same action whatever it writes: the report shows the values of
+  all passes on its line (`1.1.2. dev.fifo.data = 0, 1, … 15`); a write repeated
+  inside each pass shows `(4 times per pass, 12 values)`, and an unfinished last
+  pass (a `break` after the write) adds its value: `0, 1, … 4 -> (5 values)`. A pass that does
+  something else (a failed check, another register, another operation) ends the
+  loop and is shown as it ran, after it. Wrap the loop in `stepdoc.repeat(...)` to say what it does and
   what it waits for. With a title the block is a step of its own, at the top
   level or inside another step:
 
@@ -270,7 +282,20 @@ the plugin already publishes:
   without `name=` reads like that; with one, the name comes first:
   `Verify 'FIFO not full': dev.block.esmi<channel>_ctl.tx == 0`. A literal
   checked value keeps the old form (`Verify 'HTTP status' == 201`). The
-  check's `note=` is shown after it in parentheses.
+  check's `note=` is shown after it in parentheses. Checks made in a loop that
+  collapsed (a titled or untitled `repeat()`, or a loop that collapsed on its
+  own) join its one pass as a passing `assert` does: one line per check, with
+  the last pass's values (`1.1.3. Verify 'Readback': got == 7 -> got 7 ✓` under
+  `Each word (repeat) ✓ 6 times`). That needs the check made directly in the
+  loop the pass's actions ran in, in every pass (once per iteration: a pass
+  that covers four channels, `esmi{i % 4}`, shows four checks, one per
+  channel), and passed every time. Checks in an inner loop, in another loop of
+  the block, or in some passes only stay one line each. When a check failed in
+  some pass, every pass's result of it stays listed, in order, so the failure
+  and its pass stay visible (the loop keeps its count: verify's checks arrive
+  after the loop was collapsed, so stepdoc cannot end the loop at the failing
+  pass as it does for an `assert`). A rerun's checks (pytest-reporter's
+  `--report-retries`) go to the rerun's own steps.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.

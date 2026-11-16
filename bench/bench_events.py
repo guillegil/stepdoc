@@ -61,6 +61,16 @@ def writes(dev):
     return loop
 
 
+def varying_writes(dev):
+    """A loop writing a new value each pass: one entry that keeps the values (capped)."""
+
+    def loop(n):
+        for i in range(n):
+            dev.map.pulse.width = i
+
+    return loop
+
+
 def in_recorder(loop, **rec_kw):
     def run(n):
         with stepdoc.Recorder(**rec_kw):
@@ -162,14 +172,14 @@ def polling(record):
     return run
 
 
-def memory_per_action(n=50_000):
+def memory_per_action(n=50_000, vary=False):
     dev = make_dev(True)
     tracemalloc.start()
     with stepdoc.Recorder() as rec:
         width = 7
         before = tracemalloc.get_traced_memory()[0]
-        for _ in range(n):
-            dev.map.pulse.width = width
+        for i in range(n):
+            dev.map.pulse.width = i if vary else width
         after = tracemalloc.get_traced_memory()[0]
     tracemalloc.stop()
     del rec
@@ -184,6 +194,7 @@ def main():
     rows.append(("+ recorder, symbolic off", best(in_recorder(writes(make_dev(True)), symbolic=False))))
     rows.append(("+ recorder, capture site (deferred, default)", best(in_recorder(writes(make_dev(True))))))
     rows.append(("+ capture and resolve at once (eager, warm cache)", best(eager(make_dev(True)))))
+    rows.append(("Varying write (for i), capture, values kept", best(in_recorder(varying_writes(make_dev(True))))))
     for depth in (0, 10, 50):
         rows.append((f"Bridge behind {depth} skipped library frames, capture", best(deep_writes(depth))))
     loop, site = cold_location()
@@ -201,6 +212,7 @@ def main():
         delta = f"+{us - base:.2f}" if name.startswith("+") or "frames" in name else ""
         print(f"| {name} | {us:.2f} | {delta} |")
     print(f"\nMemory per recorded action (deferred): {memory_per_action():.0f} bytes")
+    print(f"Memory per recorded action, a new value each time: {memory_per_action(vary=True):.0f} bytes")
 
 
 if __name__ == "__main__":

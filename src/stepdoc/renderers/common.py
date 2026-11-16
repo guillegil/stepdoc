@@ -56,19 +56,29 @@ def _with_unit(text: str, meta: dict[str, Any]) -> str:
     return f"{text} {unit}" if unit else text
 
 
-def action_line(a: Record, symbolic: bool, depth: int) -> Line:
+def action_line(a: Record, symbolic: bool, depth: int, passes: Optional[int] = None) -> Line:
+    """One action. ``passes``: how often the loop holding it ran, when it is one
+    pass of a collapsed loop (the report then says when its values do not add up
+    to one per pass)."""
     meta = a.get("meta") or {}
     target = (a["target"]["symbolic"] or a["target"]["concrete"]) if symbolic else a["target"]["concrete"]
     direction = a.get("direction", "in")
     value = ""
     note = None
+    values = a.get("values")
     if direction != "out":
         if symbolic:
             if a["value"]["symbolic"] is not None:
                 value = a["value"]["symbolic"]
+            elif values:
+                value = sequence(values, a.get("values_count"))
+                note = "values from this run"
             elif a["value"]["concrete"] is not None:
                 value = show(a["value"]["concrete"])
                 note = "value from this run"
+        elif values:
+            value = sequence(values, a.get("values_count"))
+            value = _with_unit(value, meta) if direction == "in" else value
         elif a["value"]["concrete"] is not None:
             value = _with_unit(show(a["value"]["concrete"]), meta) if direction == "in" else show(a["value"]["concrete"])
     result = None
@@ -85,7 +95,7 @@ def action_line(a: Record, symbolic: bool, depth: int) -> Line:
 
     op = a["op"]
     count = a.get("count", 1)
-    if count > 1 and direction != "in":  # ACT-4: a polling loop, one line
+    if count > 1 and direction != "in" and not values:  # ACT-4: a polling loop, one line
         if not symbolic:
             noun = "reads" if direction == "out" else "calls"
             result = _times(result, count, noun, a)
@@ -100,8 +110,28 @@ def action_line(a: Record, symbolic: bool, depth: int) -> Line:
     if count > 1:  # the same write again, from one line (a loop)
         verb = f"Repeat {verb.lower()}".rstrip()
         if not symbolic:
-            result = _times(result, count, "times", a)
+            total = a.get("values_count") if values else None
+            if total is not None and total != count:  # values of every pass of a loop
+                result = _also(result, f"{count} times per pass, {total} values")
+            else:
+                result = _times(result, count, "times", a)
+    elif values and not symbolic and passes is not None and a.get("values_count") != passes:
+        # more values than passes: the unfinished last pass of a loop, for one
+        result = _also(result, f"{a.get('values_count')} values")
     return Line(a.get("number"), verb, code, result, note=note, depth=depth)
+
+
+def sequence(values: list[Any], total: Optional[int] = None) -> str:
+    """The values a loop sent, compact: all of them up to four (``0, 1, 2``), else
+    the first two and the last (``0, 1, … 15``)."""
+    cut = total is not None and total > len(values)
+    if len(values) < 3 or (len(values) <= 4 and not cut):
+        return ", ".join(show(v) for v in values) + (", …" if cut else "")
+    return f"{show(values[0])}, {show(values[1])}, … {show(values[-1])}"
+
+
+def _also(result: Optional[str], words: str) -> str:
+    return f"{result} ({words})" if result else f"({words})"
 
 
 def _times(result: Optional[str], count: int, noun: str, e: Record) -> str:
@@ -166,20 +196,24 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
     return Line(c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note)
 
 
-def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[Line]:
+def entry_lines(
+    entries: list[Record], symbolic: bool, depth: int, passes: Optional[int] = None
+) -> Iterator[Line]:
+    """Lines of ``entries``; ``passes`` when they are one pass of a loop that ran
+    that often."""
     for e in entries:
         kind = e["type"]
         if kind == "step":
             yield from step_lines(e, symbolic, depth)
         elif kind == "repeat":
             yield repeat_line(e, symbolic, depth)
-            yield from entry_lines(e["entries"], symbolic, depth + 1)
+            yield from entry_lines(e["entries"], symbolic, depth + 1, _passes(e.get("count")))
         elif kind == "check":
             yield check_line(e, symbolic, depth)
             for child in e.get("children") or []:
                 yield check_line(child, symbolic, depth + 1)
         else:
-            yield action_line(e, symbolic, depth)
+            yield action_line(e, symbolic, depth, passes)
 
 
 def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
@@ -198,7 +232,12 @@ def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
     yield Line(
         s["number"], "", title, mark=mark, note=note, depth=depth, is_step=True, remark=s.get("note")
     )
-    yield from entry_lines(s["entries"], symbolic, depth + 1)
+    loop = s.get("loop")
+    yield from entry_lines(s["entries"], symbolic, depth + 1, _passes(loop and loop.get("count")))
+
+
+def _passes(count: Any) -> Optional[int]:
+    return count if isinstance(count, int) and not isinstance(count, bool) else None
 
 
 SECTIONS = ("setup", "procedure", "teardown")

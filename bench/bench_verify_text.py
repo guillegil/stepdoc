@@ -8,8 +8,12 @@ descriptor dict with its ``location``, built on the line that reads the
 register. Three loops:
 
 * ``one step``: every pass in one step, the same register (the read polls);
-* ``4 channels``: one step, the register of channel ``i % 4`` (a collapsed loop);
-* ``1000 steps``: ``with step(...)`` inside the loop, 1,000 steps of 10 passes.
+* ``4 channels``: one step, the register of channel ``i % 4``: a collapsed loop
+  whose pass is 4 iterations, folded to one check per channel;
+* ``1000 steps``: ``with step(...)`` inside the loop, 1,000 steps of 10 passes;
+* ``repeat``: the loop in ``with repeat("Each word")``, where the 10,000 checks
+  fold into the one shown pass (ACT-10); a version without that folding keeps
+  them all.
 
 It prints, per loop:
 
@@ -52,7 +56,7 @@ TEST_MODULE = '''
 import os
 import sys
 
-from stepdoc import step
+from stepdoc import repeat, step
 
 
 class Verify:
@@ -93,6 +97,13 @@ def four_channels(verify, tb, n):
         for i in range(n):
             dat = getattr(tb.dev.block, f"esmi{i % 4}_32dat")
             verify.equal(dat.txfe, 1)  # CMD FIFO empty
+
+
+def in_repeat(verify, tb, n):
+    dat = getattr(tb.dev.block, f"esmi{3}_32dat")
+    with repeat("Each word"):
+        for _ in range(n):
+            verify.equal(dat.txfe, 1)
 
 
 def many_steps(verify, tb, n):
@@ -170,6 +181,8 @@ def run_once(mod: Any, fn: str, root: str, mode: str) -> tuple[float, float, flo
     placer = verify_adapter._Placer(rec, root)
     for d in v.records:
         placer.place(d, "procedure")
+    if hasattr(placer, "fold_loops"):  # checks made in every pass of a collapsed loop
+        placer.fold_loops()
     t2 = time.perf_counter()
     record = case_record(rec, root=root)
     t3 = time.perf_counter()
@@ -181,10 +194,14 @@ def best(mod: Any, fn: str, root: str, mode: str) -> tuple[float, float, float, 
     return (min(r[0] for r in runs), min(r[1] for r in runs), min(r[2] for r in runs), runs[-1][3])
 
 
-def first_lines(record: Any) -> list[str]:
+def _procedure(record: Any) -> list[str]:
     from stepdoc.renderers.common import procedure_lines
 
-    return procedure_lines(record)[:2]
+    return list(procedure_lines(record))
+
+
+def first_lines(record: Any) -> list[str]:
+    return _procedure(record)[:2]
 
 
 def main() -> None:
@@ -196,12 +213,19 @@ def main() -> None:
         try:
             mod = importlib.import_module("bench_verify_module")
             rows = []
-            for label, fn in (("one step", "one_step"), ("4 channels", "four_channels"), ("1000 steps", "many_steps")):
+            loops = (
+                ("one step", "one_step"),
+                ("4 channels", "four_channels"),
+                ("1000 steps", "many_steps"),
+                ("repeat", "in_repeat"),
+            )
+            for label, fn in loops:
                 none = best(mod, fn, root, "none")
                 on = best(mod, fn, root, "notes")
                 off = best(mod, fn, root, "plain") if has_notes else None
                 rows.append((label, none, on, off))
             sample = first_lines(rows[0][2][3])
+            folded = len(_procedure(rows[3][2][3]))
         finally:
             sys.path.remove(root)
     where = os.path.dirname(stepdoc.__file__)
@@ -224,6 +248,7 @@ def main() -> None:
         )
     print()
     print("procedure (one step):", " | ".join(line.strip() for line in sample))
+    print(f"procedure (repeat): {folded} lines")
 
 
 if __name__ == "__main__":

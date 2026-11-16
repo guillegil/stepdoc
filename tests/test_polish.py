@@ -32,15 +32,16 @@ def test_polling_collapses_into_one_entry(dev, rec):
     assert first["value"]["concrete"] is True
 
 
-def test_identical_writes_collapse_but_different_values_do_not(dev, rec):
+def test_writes_from_one_line_collapse_and_keep_their_values(dev, rec):
     for _ in range(3):
         dev.map.ctrl.enable = 1
     for level in (1, 2):
         dev.map.dac.level = level
-    assert [(a.target, a.count) for a in rec.unscoped] == [
-        ("dev.map.ctrl.enable", 3),
-        ("dev.map.dac.level", 1),
-        ("dev.map.dac.level", 1),
+    dev.map.dac.level = 3  # another line: kept apart
+    assert [(a.target, a.count, a.values) for a in rec.unscoped] == [
+        ("dev.map.ctrl.enable", 3, None),
+        ("dev.map.dac.level", 2, [1, 2]),
+        ("dev.map.dac.level", 1, None),
     ]
 
 
@@ -53,9 +54,14 @@ def test_repeated_requests_collapse_when_identical(api, rec):
             api.post("/users", json={"name": f"u{i}", "age": i})
     wait, posts = rec.steps
     assert [a.count for a in wait.actions] == [3]
-    assert [a.count for a in posts.actions] == [1, 1]
+    # Requests from one line collapse whatever they send; each body is kept.
+    (post,) = posts.actions
+    assert post.count == 2 and post.values == [{"name": "u0", "age": 0}, {"name": "u1", "age": 1}]
     assert procedure(rec)[:2] == ["1. Wait for job", "   1.1. Poll GET /version"]
     assert "1.1. Poll GET /version -> 404 (3 calls, " in report(rec)
+    line = next(x for x in report(rec).splitlines() if "2.1." in x)
+    assert line.startswith("   2.1. Repeat POST /users  {'name': 'u0', 'age': 0}, {'name': 'u1', 'age': 1}")
+    assert "(2 times, " in line
 
 
 def test_collapse_can_be_turned_off(dev):

@@ -11,11 +11,11 @@ Then read it as a reviewer would, and fix the test, not the document.
 | You see | Cause | Fix |
 |---|---|---|
 | `2048` where a parameter belongs | a literal in the test | use the parameter or a named variable |
-| `(value from this run)` | the source line was not found | add the driver or client to `stepdoc_skip_modules`; set the bridge's `value_from` |
+| `(value from this run)`, `(values from this run)` | the source line was not found | add the driver or client to `stepdoc_skip_modules`; set the bridge's `value_from` |
 | `<some_long_expression>` | an inline computation | assign it to a well-named variable, or `stepdoc.value("name", expr)` |
 | Actions under "Unscoped" | actions outside any `with step(...)` | wrap them in a step, or move them into a fixture |
 | Dozens of identical reads | reads from different lines | read in one loop line, or use `@step(..., record=False)` |
-| A loop shows every pass | the body does more than 8 actions, or a step/failed check in each pass | shorten the body with a `record=False` helper; check once after the loop |
+| A loop shows every pass | the body does more than 8 actions, a step/failed check in each pass, or the source was not found (writes of different values then never collapse) | shorten the body with a `record=False` helper; check once after the loop; fix `stepdoc_skip_modules` |
 | `Repeat` with no words | a loop collapsed on its own | wrap it in `with stepdoc.repeat("…", until="…"):` |
 | A step with no lines | the step's actions were not recorded | check the bridge is attached in the fixture the test uses |
 | No "Verify" lines for passing asserts | `enable_assertion_pass_hook` is off | set it in the pytest ini and clear `.pyc` caches |

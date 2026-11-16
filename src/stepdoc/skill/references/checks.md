@@ -77,6 +77,14 @@ reads). Otherwise it shows its argument as written, without following aliases
 1` after the `Read … -> <v>` lines). Two checks of one kind on one line are told
 apart by their automatic names; named ones keep the old form there.
 
+In a loop that collapsed (`repeat()` or a plain `for`/`while`), a verify check
+made directly in that loop in every pass that passed every time is one line in
+the shown pass, with the last pass's values, like a passing `assert` (a pass of
+several iterations, such as a loop over `i % 4` channels, shows one line per
+iteration). If it failed in any pass, it is listed once per pass, in order (the
+loop's count is unchanged). Checks in an inner loop, a second loop, or only some
+passes are listed one per call.
+
 ## step(check=...)
 
 `step(title, check=value)` records a one-line step holding one check. It is not a

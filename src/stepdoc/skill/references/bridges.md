@@ -128,9 +128,18 @@ stepdoc.record_action(f"scope.ch{channel}.{kind}", "measure", value, unit="V")
 ## Polling and loops
 
 Repeated reads of the same target from one source line collapse into one
-`Poll …` line with a count and duration; the same write repeated with the same
-value becomes one `Repeat …` line. When a group of up to 8 actions repeats back
-to back (a loop body), the passes become one `Repeat` entry holding one pass.
+`Poll …` line with a count and duration; the same write (or request) repeated
+from one statement, reached through the same calls, becomes one `Repeat …` line,
+whatever value it sends (a write inside a user helper counts by the line that
+called it: a helper called from two lines stays two lines). When
+a group of up to 8 actions repeats back to back (a loop body), the passes become
+one `Repeat` entry holding one pass. Writes that sent different values keep them
+all: the procedure shows the source (`dev.fifo.data = <i>`), the report the
+values (`dev.fifo.data = 0, 1, … 15`), and the record's action has `values`
+(capped at the first and last 32) and `values_count`. Without a captured source
+line, only writes of the same value collapse. So a bridge must record from the
+test's line (`capture` works through `stepdoc_skip_modules`) for a loop writing
+`i` to read as one line.
 Wrap a loop in `with stepdoc.repeat("Drain the FIFO", until="FIFO is empty"):` to
 say what it does and what it waits for. With a title the block is a step of its
 own (top level or nested): `2. Drain the FIFO (repeat until FIFO is empty)`, its

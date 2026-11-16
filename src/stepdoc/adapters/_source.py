@@ -55,6 +55,42 @@ def statement_span(path: str, line: int) -> tuple[int, int]:
     return best.lineno, best.end_lineno or line
 
 
+@lru_cache(maxsize=256)
+def _loops(path: str) -> tuple[tuple[int, int], ...]:
+    """First and last line of every ``for`` and ``while`` statement in the file."""
+    tree = _tree(path)
+    if tree is None:
+        return ()
+    return tuple(
+        (node.lineno, node.end_lineno or node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While))
+    )
+
+
+@lru_cache(maxsize=4096)
+def loop_at(path: str, line: int) -> Optional[tuple[int, int]]:
+    """Lines of the innermost ``for`` or ``while`` statement that contains
+    ``line``; None outside a loop or when the source cannot be read."""
+    best: Optional[tuple[int, int]] = None
+    for first, last in _loops(path):
+        if first <= line <= last and (
+            best is None or first > best[0] or (first == best[0] and last < best[1])
+        ):
+            best = (first, last)
+    return best
+
+
+@lru_cache(maxsize=1024)
+def outer_loops(path: str, first: int, last: int) -> tuple[tuple[int, int], ...]:
+    """Lines of the ``for`` and ``while`` statements within lines ``first`` to
+    ``last`` that no other one there contains."""
+    inside = [s for s in _loops(path) if first <= s[0] and s[1] <= last]
+    return tuple(
+        s for s in inside if not any(o != s and o[0] <= s[0] and s[1] <= o[1] for o in inside)
+    )
+
+
 @lru_cache(maxsize=4096)
 def calls_at(path: str, line: int, method: str) -> tuple[ast.Call, ...]:
     """The calls of ``something.method(...)`` (or ``method(...)``) that span

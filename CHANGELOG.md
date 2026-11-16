@@ -3,6 +3,58 @@
 ## Unreleased
 
 ### Added
+- Loops that write a different value each pass collapse (ACT-4, ACT-10). A write
+  or request from the same statement, reached through the same calls, is the same
+  event whatever it sends (a write inside a helper counts by the line that called
+  the helper, so a helper called from two lines, or two writes on one line, stay
+  two events), so
+  `for i in range(16): dev.fifo.data = i; dev.da_read(0x10)` is one `Repeat`
+  entry (`16 times`) with one pass, and a `repeat("Mixed")` block shows
+  `✓ 16 times` instead of 32 lines. Nothing is lost: `Action.values` keeps every
+  value sent, in order (`None` when they were all the same; `value` stays the
+  last), at most 64 (the first and last 32; `Action.values_count` is the total).
+  The procedure shows the source (`dev.fifo.data = <i>`), the report the values
+  on the action's line: all up to four, else the first two and the last
+  (`dev.fifo.data = 0, 1, … 15`, `Repeat dev.fifo.data = 0, 1, … 15 -> (16 times,
+  2 ms)`), in text, Markdown and HTML. When the values span several passes of a
+  loop, the line says so: `(4 times per pass, 12 values)` for a repeated write
+  in each pass, `(5 values)` when an unfinished last pass (a `break`) added one.
+  Without a captured source line (a recorder
+  with `symbolic=False`) writes must still send the same value;
+  `stepdoc_collapse_repeats = false` still turns all collapsing off.
+- Run record schema 0.4: actions get optional `values` and `values_count`.
+- pytest-verifier checks made in a collapsed loop fold into its one pass, as a
+  passing `assert` does (ACT-10). The verify adapter places checks after the
+  phase, when the loop is already a `Repeat` (or a titled `repeat()` step), so
+  `Each word (repeat) ✓ 6 times` showed the pass's actions and then six
+  `Verify 'Readback': got == 7 -> got 7 ✓` lines. Now the checks of one call
+  site with one symbolic text become one check with the last pass's values,
+  when they were made directly in the `for` or `while` statement the pass's
+  actions ran in (not in an inner loop or another loop of the block), once per
+  pass, and all passed (or none was judged): in a titled `repeat()` step in
+  place, in a `Repeat` entry (untitled `repeat()`, or a loop that collapsed on
+  its own) moved into its pass, before or after its actions by line, taking
+  the read on its line that the pass holds (ACT-5:
+  `Verify 'RB': dev.da == 7 -> got 7 ✓`). A check made before the pass's first
+  action folds too. Several different checks per pass fold each. When one
+  pass covers several iterations (a loop over channels, `esmi{i % 4}`), the
+  checks fold to one per position in the pass, each with its own read
+  (`Verify dev.block.esmi0_32dat.txfe == 1` … `esmi3`), as asserts do. A loop
+  whose pass is a single action (shown as `Repeat dev.fifo.data = 0, 1, 2, 3`)
+  becomes a `Repeat` holding the action and its check. In a titled `repeat()`
+  whose actions were made outside any loop (in a helper), the loop is the one
+  `for`/`while` statement of the block; with several, nothing folds. A check
+  that failed in some pass is not folded: its result for every pass stays
+  visible, in pass order (after the pass of a titled `repeat()`; before or
+  after a `Repeat`, where it was placed), and the loop keeps its count
+  (stepdoc cannot end the loop at the failing pass after the fact, as it does
+  live for an `assert`). Checks made in some passes only, checks outside
+  loops, composites, and everything with `stepdoc_collapse_repeats = false`
+  are unchanged. pytest-reporter's `procedure.json` follows, with no change
+  there.
+- `bench/bench_verify_text.py`: a `repeat` loop whose 10,000 checks fold, and
+  placing includes the folding.
+- `bench/bench_events.py`: a loop writing a new value each time, and its memory.
 - Verify lines read like the code. pytest-verifier's comparisons (`equal`,
   `not_equal`, `approx`, `greater`, `greater_equal`, `less`, `less_equal`),
   `between`, `is_true`, `is_false`, `is_none` and `is_not_none` start with the
@@ -85,11 +137,20 @@
   rewrites an editable plugin's asserts; recording them recursed).
 - Passing asserts no longer keep a trailing comment in their text (some pytest
   versions include it); it becomes the check's note.
-- The same write repeated from one source line, with the same value, collapses
-  into one line, like polling: `Repeat dev.fifo.fifo_data = <cmd>`, and in the
-  report `(16 times, 2 ms)`. Writes used to stay one line each.
+- The same write repeated from one source line collapses into one line, like
+  polling: `Repeat dev.fifo.fifo_data = <cmd>`, and in the report `(16 times,
+  2 ms)`, whatever value each write sent (the report then lists them, see Added).
+  Writes used to stay one line each.
   `stepdoc_collapse_repeats = false` keeps every write.
 - Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
+
+### Fixed
+- pytest-verifier checks of a rerun (pytest-reporter's `--report-retries`,
+  pytest-rerunfailures) go to that attempt's steps. The recorder spans every
+  attempt, and the first check from a line went to the first attempt's step of
+  the same title, which then showed one check too many while the rerun's step
+  missed one (and its loop could not fold). `Recorder.attempt` marks where the
+  current attempt's steps start; the pytest plugin sets it at each setup.
 
 ## 0.2.0
 

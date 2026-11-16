@@ -135,6 +135,7 @@
       "type": "object",
       "required": ["type", "number", "op", "direction", "target", "value", "bound_to", "resolved", "location", "t", "meta"],
       "additionalProperties": false,
+      "dependentRequired": {"values": ["values_count"], "values_count": ["values"]},
       "properties": {
         "type": {"const": "action"},
         "number": {"type": ["string", "null"], "description": "null for unscoped actions"},
@@ -163,6 +164,8 @@
         "t": {"type": "number"},
         "count": {"type": "integer", "minimum": 1, "description": "Identical consecutive events from one code location collapsed into this entry (ACT-4 polling)"},
         "t_last": {"type": ["number", "null"], "description": "Time of the last repeated event when count > 1"},
+        "values": {"type": "array", "maxItems": 64, "description": "Every value sent, in order, when the events this entry stands for (the same write in a loop, or this action in each pass of a collapsed loop) did not all send the same one; value.concrete is the last. Absent when they all sent value.concrete. At most 64 items: past that, the first 32 and the last 32 (see values_count). Items are JSON values like value.concrete"},
+        "values_count": {"type": "integer", "minimum": 2, "description": "How many values were sent; more than len(values) when the middle was left out. Inside a collapsed loop it counts every pass, so it can differ from count (the first pass's repeats) and from the loop's count (an unfinished last pass adds its values). Present with values"},
         "meta": {"type": "object", "description": "Bridge metadata, for example the HTTP status code"},
         "section": {"$ref": "#/$defs/section"}
       }

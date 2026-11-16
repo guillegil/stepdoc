@@ -119,13 +119,18 @@ def test_a_failing_pass_stays_visible(dev, rec):
 
 def test_a_pass_that_differs_ends_the_loop(dev, rec):
     with step("Mixed"):
-        for level in (1, 1, 1, 2, 1):
+        for i, reg in enumerate(("width", "width", "width", "period", "width")):
             dev.map.ctrl.mode = READ_FIFO
-            dev.map.dac.level = level
+            setattr(dev.map.pulse, reg, i)
     entries = rec.steps[0].entries
     assert [type(e).__name__ for e in entries] == ["Repeat", "Action", "Action", "Action", "Action"]
-    assert entries[0].count == 3
-    assert [e.value for e in entries[2:]] == [2, 1, 1]
+    assert entries[0].count == 3 and entries[0].entries[1].values == [0, 1, 2]
+    assert [(e.target, e.value) for e in entries[1:]] == [
+        ("dev.map.ctrl.mode", 1),
+        ("dev.map.pulse.period", 3),
+        ("dev.map.ctrl.mode", 1),
+        ("dev.map.pulse.width", 4),
+    ]
 
 
 def test_passing_checks_in_every_pass_are_part_of_the_loop(dev, rec):
@@ -215,10 +220,10 @@ def _check(text, passed=True, at=None):
 def test_repeat_block_whose_passes_differ_keeps_them_all(dev, rec):
     with step("Mixed"):
         with repeat(until="done"):
-            for level in (1, 2, 3):
-                dev.map.dac.level = level
+            for i, reg in enumerate(("width", "period", "width")):
+                setattr(dev.map.pulse, reg, i)
     (loop,) = rec.steps[0].entries
-    assert loop.count is None and [a.value for a in loop.entries] == [1, 2, 3]
+    assert loop.count is None and [a.value for a in loop.entries] == [0, 1, 2]
     assert [a.number for a in loop.entries] == ["1.1.1", "1.1.2", "1.1.3"]
     assert "   1.1. Repeat until done" in report(rec).splitlines()
 
