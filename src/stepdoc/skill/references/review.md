@@ -16,7 +16,7 @@ Then read it as a reviewer would, and fix the test, not the document.
 | Actions under "Unscoped" | actions outside any `with step(...)` | wrap them in a step, or move them into a fixture |
 | Dozens of identical reads | reads from different lines | read in one loop line, or use `@step(..., record=False)` |
 | A loop shows every pass | the body does more than 8 actions, or a step/failed check in each pass | shorten the body with a `record=False` helper; check once after the loop |
-| `Repeat` with no words | a loop collapsed on its own | wrap it in `with stepdoc.repeat(until="…"):` |
+| `Repeat` with no words | a loop collapsed on its own | wrap it in `with stepdoc.repeat("…", until="…"):` |
 | A step with no lines | the step's actions were not recorded | check the bridge is attached in the fixture the test uses |
 | No "Verify" lines for passing asserts | `enable_assertion_pass_hook` is off | set it in the pytest ini and clear `.pyc` caches |
 | Procedure split into variants | different parameters took different code paths | intended? if not, make the steps unconditional |

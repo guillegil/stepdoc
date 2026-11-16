@@ -38,7 +38,10 @@ def _md_line(line: Line) -> str:
         parts.append(line.mark)
     if line.note:
         parts.append(f"_{line.note}_")
-    return f"{indent}- " + " ".join(parts)
+    text = f"{indent}- " + " ".join(parts)
+    if line.remark:  # under the item, as its own paragraph
+        text += "\n\n" + "\\\n".join(f"{indent}  > {r}" for r in line.remark.splitlines())
+    return text
 
 
 def render_procedure(record: Record, title: str = "Test procedures") -> str:

@@ -59,6 +59,7 @@ nav ol { padding-left: 20px; margin: 8px 0; }
 .body { flex: 1; min-width: 0; }
 .result { color: var(--muted); }
 .note { color: var(--muted); font-size: 13px; font-weight: 400; }
+.remark { color: var(--muted); font-style: italic; white-space: pre-line; padding: 0 8px 4px 4.6em; }
 .mark { font-weight: 700; min-width: 1em; }
 .passed, .mark-pass { color: var(--pass); }
 .failed, .error, .mark-fail { color: var(--fail); }
@@ -126,7 +127,8 @@ def _line(line: Line) -> str:
     mark = ""
     if line.mark:
         mark = f'<span class="mark {_MARK_CLASS.get(line.mark, "")}">{escape(line.mark)}</span>'
-    return f'<div class="{cls}"{pad}>{num}<span class="body">{body}</span>{mark}</div>'
+    remark = f'<div class="remark"{pad}>{escape(line.remark)}</div>' if line.remark else ""
+    return f'<div class="{cls}"{pad}>{num}<span class="body">{body}</span>{mark}</div>{remark}'
 
 
 def _lines(lines: list[Line]) -> str:

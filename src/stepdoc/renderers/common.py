@@ -30,6 +30,8 @@ class Line:
     note: Optional[str] = None
     depth: int = 0
     is_step: bool = False
+    remark: Optional[str] = None
+    """A step's or repeat's ``note=``, shown under its line in both documents."""
 
 
 def show(value: Any) -> str:
@@ -107,16 +109,37 @@ def _times(result: Optional[str], count: int, noun: str, e: Record) -> str:
     return f"{result} ({count} {noun}{spent})" if result else f"({count} {noun}{spent})"
 
 
+def loop_words(r: Record) -> str:
+    """``repeat until FIFO is empty, counting write_count`` (ACT-10)."""
+    words = f"repeat until {r['until']}" if r.get("until") else "repeat"
+    if r.get("counter"):
+        inc = r.get("inc")
+        if inc is None or inc == 1:
+            words += f", counting {r['counter']}"
+        else:
+            words += f", {r['counter']} {'+' if inc >= 0 else '-'}{show(abs(inc))} each pass"
+    return words
+
+
+def times(count: Any) -> Optional[str]:
+    """How often a loop ran, for the report: ``once``, ``16 times``."""
+    if not isinstance(count, int) or isinstance(count, bool):
+        return None
+    return "once" if count == 1 else f"{count} times"
+
+
 def repeat_line(r: Record, symbolic: bool, depth: int) -> Line:
-    """ACT-10: ``Repeat until FIFO is empty``; the report adds how often."""
-    verb = f"Repeat until {r['until']}" if r.get("until") else "Repeat"
+    """ACT-10: an untitled ``repeat()`` block or a loop that collapsed on its own,
+    ``Repeat until FIFO is empty``; the report adds how often."""
+    words = loop_words(r)
+    verb = f"{r['title']} ({words})" if r.get("title") else words[0].upper() + words[1:]
     note = None
     count = r.get("count")
     if not symbolic and count is not None:
-        note = "once" if count == 1 else f"{count} times"
+        note = times(count)
         if count > 1 and r.get("t_last") is not None and r.get("t") is not None:
-            note += f", {(r['t_last'] - r['t']) * 1000:.0f} ms"
-    return Line(r.get("number"), verb, "", note=note, depth=depth)
+            note = f"{note}, {(r['t_last'] - r['t']) * 1000:.0f} ms"
+    return Line(r.get("number"), verb, "", note=note, depth=depth, remark=r.get("note"))
 
 
 def check_line(c: Record, symbolic: bool, depth: int) -> Line:
@@ -163,9 +186,15 @@ def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
         mark = STATUS_MARK.get(s["status"], "?")
         ms = (s["ended"] - s["started"]) * 1000
         note = f"{ms:.0f} ms" if ms >= 1 else None
+        loop = s.get("loop")
+        if loop and times(loop.get("count")):
+            note = " · ".join(p for p in (times(loop["count"]), note) if p)
         if s.get("error"):
             note = (note + " · " if note else "") + s["error"].splitlines()[0]
-    yield Line(s["number"], "", s["title"], mark=mark, note=note, depth=depth, is_step=True)
+    title = f"{s['title']} ({loop_words(s['loop'])})" if s.get("loop") else s["title"]
+    yield Line(
+        s["number"], "", title, mark=mark, note=note, depth=depth, is_step=True, remark=s.get("note")
+    )
     yield from entry_lines(s["entries"], symbolic, depth + 1)
 
 
@@ -210,8 +239,21 @@ def plain(line: Line) -> str:
     return "   " * line.depth + head + body
 
 
+def remark_lines(line: Line) -> list[str]:
+    """A line's ``note=`` as plain text, indented under it like its entries."""
+    if not line.remark:
+        return []
+    pad = "   " * (line.depth + 1)
+    first, *rest = line.remark.splitlines()
+    return [f"{pad}Note: {first}", *(f"{pad}      {r}" for r in rest)]
+
+
 def procedure_lines(test: Record, sections: tuple[str, ...] = SECTIONS) -> list[str]:
-    return [plain(line) for line in test_lines(test, symbolic=True, sections=sections)]
+    out = []
+    for line in test_lines(test, symbolic=True, sections=sections):
+        out.append(plain(line))
+        out.extend(remark_lines(line))
+    return out
 
 
 def report_lines(test: Record) -> list[str]:
@@ -220,6 +262,7 @@ def report_lines(test: Record) -> list[str]:
         text = plain(line)
         tail = " ".join(p for p in (line.mark, line.note) if p)
         out.append(f"{text}   {tail}" if tail else text)
+        out.extend(remark_lines(line))
     return out
 
 

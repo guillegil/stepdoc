@@ -54,6 +54,12 @@ Rules that keep the procedure readable:
    the check's line.
 7. **Name computed values** with `stepdoc.value("code", level * 2)` when the
    expression would read badly or passes through a helper.
+8. **Say why with `note=`** when the title alone does not: `step("Fill the FIFO",
+   note="512 words, 12 reserved")`. It is shown under the step's line.
+9. **Name loops with `stepdoc.repeat("Drain the FIFO", until="FIFO is empty")`**
+   around the `for`/`while`. With a title it is a step of its own (top level or
+   nested); add `counter="write_count"` (and `inc=4` when it does not grow by 1)
+   when the test counts the passes. See [references/bridges.md](references/bridges.md).
 
 ## Bridges: where actions come from
 
