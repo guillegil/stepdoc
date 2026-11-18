@@ -3,6 +3,38 @@
 ## Unreleased
 
 ### Added
+- Operand names word verify checks. A pytest-verifier check made with
+  `actual_name=` reads with that name in place of the folded register read or the
+  argument's source, and one made with `expected_name=` names its expected value:
+  the procedure shows only the generic form (`Verify
+  tb.dev.map.block.reg<channel>.F == <wdata>`: each interpolation as `<...>`, a
+  plain name as written, the expected name in `<...>` like any expected value
+  given by name, no value of the run), the report this run's
+  (`tb.dev.map.block.reg3.F == wdata (243) -> got 240 ✗`). With `name=` too, the
+  name comes first (`'Stored word': tb.dev.map.block.reg<channel>.F == <wdata>`).
+  All 17 value checks take `actual_name=`; the comparisons and `length` take
+  `expected_name=`, with units and `approx` tolerances kept (`== <nominal> V ±
+  0.05V`). Reads on the check's line still go into the check, and composite
+  children are worded the same way. The procedure's text is built from the
+  names themselves, so it holds no value of the run even when pytest-verifier's
+  description shortens or escapes a name. An expected name whose `<` and `>`
+  compare (`a < b > c`) is no variable part and gets its `<...>` too. Line
+  breaks and control characters in a name read as a space. Two checks of one
+  kind on one line are told apart by their `actual_name=` (a string, or an
+  f-string whose literal parts fit only one of them), so each takes its own read
+  and expected name. Records without the names read exactly as before.
+- Run record schema 0.4: checks get an optional `operands` (`actual` and
+  `expected`, each `{"concrete", "symbolic"}`) and an optional `label` (the
+  `name=` the text starts with). `Check.operands` and `Check.label` carry them to
+  plugins that follow steps.
+- HTML: the code of a verify line is `<code class="expr">`; a name given with
+  `name=` is shown before it in the text font (`<span class="label">`), as the
+  note already is after it. Code uses a fuller system monospace stack
+  (`ui-monospace`, SF Mono, Menlo, Cascadia Mono, Consolas, Roboto Mono, DejaVu
+  Sans Mono, Liberation Mono; no web fonts) without ligatures, so `==`, `!=` and
+  `<=` stay as typed; long dotted names may wrap after their dots and keep their
+  background on every line, and a long `name=` without spaces wraps too. Markdown shows the name as words and the code between
+  backticks, with a fence longer than any backticks inside.
 - Verify lines read like the code. pytest-verifier's comparisons (`equal`,
   `not_equal`, `approx`, `greater`, `greater_equal`, `less`, `less_equal`),
   `between`, `is_true`, `is_false`, `is_none` and `is_not_none` start with the

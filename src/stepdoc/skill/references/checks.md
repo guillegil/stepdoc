@@ -75,7 +75,43 @@ pass's check takes its pass's read (a polled read stands for as many checks as
 reads). Otherwise it shows its argument as written, without following aliases
 (`v = getattr(...).txfe` then `verify.equal(v, 1)` in a loop reads `Verify v ==
 1` after the `Read … -> <v>` lines). Two checks of one kind on one line are told
-apart by their automatic names; named ones keep the old form there.
+apart by their automatic names or their `actual_name=`; ones with only `name=`
+keep the old form there.
+
+### Operand names
+
+When the code does not say what a value is (a field read through `getattr`, a
+value computed earlier), name the operands. The names word the check instead of
+the source:
+
+```python
+block_reg_f = getattr(tb.dev.map.block, f"reg{channel}").F
+verify.equal(block_reg_f, wdata,
+             actual_name=f"tb.dev.map.block.reg{channel}.F", expected_name="wdata")
+```
+
+```text
+procedure   Verify tb.dev.map.block.reg<channel>.F == <wdata>
+report      Verify tb.dev.map.block.reg3.F == wdata (243) -> got 240 ✗
+```
+
+- Write `actual_name=` as an f-string (or a t-string on Python 3.14+) on the
+  call itself, so the procedure gets the generic form (`reg<channel>`). A plain
+  string, or one built elsewhere, is shown as given in both documents: with a
+  run's value in it, parametrized cases stop sharing one procedure.
+- The procedure never shows a value of the run for a named operand; the report
+  shows the expected value once, after its name.
+- An expected name reads `<wdata>` in the procedure; one with parts of its own
+  (`limits[<channel>]`, from `f"limits[{channel}]"` or written so) stays as it is.
+- Two checks of one kind on one line are told apart by their `actual_name=`.
+  When the names fit both calls (`f"R{a}"` and `f"R{b}"`), each check keeps
+  pytest-verifier's text and the reads stay on their own lines: put the checks
+  on separate lines.
+- `name=` is still allowed: `Verify 'Stored word': tb.dev.map.block.reg<channel>.F == <wdata>`.
+- `actual_name=` is on every check of one value; `expected_name=` on `equal`,
+  `not_equal`, `approx`, `greater…`, `less…` and `length`.
+- HTML shows the checked expression, comparison and operand names in monospace;
+  `name=` and notes stay prose.
 
 ## step(check=...)
 

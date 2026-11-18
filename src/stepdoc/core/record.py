@@ -118,6 +118,8 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         **_section(c.section),
         **({} if c.symbolic_text is None else {"symbolic_text": c.symbolic_text}),
         **({} if c.note is None else {"note": c.note}),
+        **({} if c.label is None else {"label": c.label}),
+        **({} if c.operands is None else {"operands": c.operands}),
     }
 
 

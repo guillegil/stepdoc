@@ -3,6 +3,7 @@ scripts, readable on screen and in print. Rendered from the JSON run record."""
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Optional
 
@@ -25,6 +26,8 @@ _CSS = """
 :root {
   --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --code-bg: #f6f8fa;
   --pass: #1a7f37; --fail: #cf222e; --unknown: #9a6700; --step-bg: #f6f8fa;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+    "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -44,8 +47,9 @@ h3 { font-size: 15px; margin: 20px 0 8px; }
 a { color: inherit; }
 .meta { color: var(--muted); font-size: 13px; margin: 0 0 12px; overflow-wrap: anywhere; }
 code, .code {
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 13px/1.5 var(--mono); font-variant-ligatures: none;
   background: var(--code-bg); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
 }
 table { border-collapse: collapse; margin: 8px 0 16px; width: 100%; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -56,7 +60,7 @@ nav ol { padding-left: 20px; margin: 8px 0; }
 .line.step { font-weight: 600; margin-top: 6px; padding: 4px 8px; background: var(--step-bg); border-radius: 6px; }
 .line.section { font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; color: var(--muted); margin-top: 12px; }
 .num { color: var(--muted); min-width: 3.5em; font-variant-numeric: tabular-nums; }
-.body { flex: 1; min-width: 0; }
+.body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .result { color: var(--muted); }
 .note { color: var(--muted); font-size: 13px; font-weight: 400; }
 .remark { color: var(--muted); font-style: italic; white-space: pre-line; padding: 0 8px 4px 4.6em; }
@@ -105,6 +109,18 @@ def _code(text: str) -> str:
     return f"<code>{escape(text)}</code>" if text else ""
 
 
+# A dot inside a dotted name (``dev.block.reg<ch>.F``, not ``3.3``): escaped text,
+# so a ``>`` before the dot is ``&gt;``.
+_DOT = re.compile(r"(?<=[\w\])};])\.(?=[A-Za-z_])")
+
+
+def _expr(text: str) -> str:
+    """A check's code (the checked expression, the comparison, operand names) as
+    <code>: ``<channel>`` shows as written, and a long dotted name may wrap after
+    its dots."""
+    return f'<code class="expr">{_DOT.sub(".<wbr>", escape(text))}</code>' if text else ""
+
+
 def _title(text: str) -> str:
     """A step title, its `code` spans (FMT-1) as <code>."""
     return "".join(_code(t) if code else escape(t) for t, code in spans(text))
@@ -119,7 +135,9 @@ def _line(line: Line) -> str:
     if line.is_step:
         body = _title(line.code)
     else:
-        body = " ".join(p for p in (escape(line.verb), _code(line.code)) if p)
+        label = f'<span class="label">{escape(line.label)}</span>' if line.label else ""
+        code = _expr(line.code) if line.is_check else _code(line.code)
+        body = " ".join(p for p in (escape(line.verb), label, code) if p)
         if line.aside:
             body += f' <span class="aside">({escape(" ".join(line.aside.split()))})</span>'
         if line.result:
