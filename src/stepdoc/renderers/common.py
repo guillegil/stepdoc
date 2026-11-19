@@ -153,7 +153,9 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
     result = None
     if not symbolic:
         mark = {True: "✓", False: "✗", None: "·"}[c["passed"]]
-        if c.get("actual") is not None:
+        if isinstance(c.get("actual_text"), str) and c["actual_text"]:
+            result = f"got {c['actual_text']}"  # the producer's rendering: 0x00F0
+        elif c.get("actual") is not None:
             result = f"got {show(c['actual'])}"
         elif c.get("reads"):  # ACT-5: the reads that fed the check
             reads = c["reads"]
@@ -163,6 +165,9 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
                 result = "got " + ", ".join(
                     f"{r['target']['concrete']} = {show(r['value']['concrete'])}" for r in reads
                 )
+        difference = c.get("difference")
+        if c["passed"] is False and isinstance(difference, str) and difference:
+            result = f"{result}, {difference}" if result else difference
     each = c.get("each")
     if not symbolic and isinstance(each, dict) and isinstance(each.get("count"), int):
         result = each_result(each, c["passed"] is not None)

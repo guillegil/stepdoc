@@ -53,7 +53,9 @@ Rules that keep the procedure readable:
    step; a read on the assert's line (`assert dev.map.adc.value == 0`) is shown on
    the check's line.
 7. **Name computed values** with `stepdoc.value("code", level * 2)` when the
-   expression would read badly or passes through a helper.
+   expression would read badly or passes through a helper. A helper decorated
+   with `@stepdoc.look_through` documents its parameters as the caller's
+   argument expressions.
 8. **Say why with `note=`** when the title alone does not: `step("Fill the FIFO",
    note="512 words, 12 reserved")`. It is shown under the step's line.
 9. **Name loops with `stepdoc.repeat("Drain the FIFO", until="FIFO is empty")`**
@@ -100,6 +102,11 @@ database, CLI and device recipes and every `record_action` argument.
   place of its source: `verify.equal(f, wdata, actual_name=f"blk.reg{ch}.F",
   expected_name="wdata")` reads `Verify blk.reg<ch>.F == <wdata>` in the procedure
   and `blk.reg3.F == wdata (243)` in the report (references/checks.md).
+- A register check shows what pytest-verifier shows: `verify.bits(dev.CTRL, wdata,
+  mask=MASK, width=16)` reads `Verify dev.CTRL & <MASK> == <wdata>` in the
+  procedure and `dev.CTRL & 0x00FF == 0x00F3 -> got 0x12F0, bits [1:0] differ ✗`
+  in the report; `radix=`/`width=` on a comparison put its values in hex too
+  (pytest-verifier 0.11+, references/checks.md).
 - stepdoc never compares values itself.
 
 Details: [references/checks.md](references/checks.md).
@@ -108,9 +115,15 @@ Details: [references/checks.md](references/checks.md).
 
 ```toml
 [tool.pytest.ini_options]
-stepdoc_skip_modules = ["httpx", "mydevice"]
-enable_assertion_pass_hook = true
+stepdoc_skip_modules = ["httpx", "mydevice"]   # libraries between the test and the bridge
+enable_assertion_pass_hook = true              # record passing asserts
+# stepdoc_collapse_repeats = false             # keep every polled read, repeated write and loop pass
+# stepdoc_comment_notes = false                # do not take check notes from comments
+# stepdoc_adapters = ["-verify"]               # leave an adapter out; ["none"] runs none
 ```
+
+The plugin records only when one of its options is given (`--stepdoc-record`,
+`--stepdoc-procedure`, `--stepdoc-report`, `--stepdoc-dry-run`).
 
 ## Generating and reviewing the documents
 
@@ -132,11 +145,33 @@ The file extension picks the format: `.md`, `.html` or `.txt`.
   `stepdoc_skip_modules` or the bridge's `value_from`);
 - nothing important is in "Unscoped";
 - polling shows as one "Poll …" line, and a loop as one "Repeat" entry, not
-  dozens of lines.
+  dozens of lines. A `verify.*` check made in every pass is the exception: it
+  is one line per pass (check once after the loop, or `verify.all_satisfy`).
 
 See [references/review.md](references/review.md) for common mistakes and fixes,
 and [references/dry-run.md](references/dry-run.md) for running without the real
 system.
+
+## With other plugins
+
+stepdoc imports none of them; an adapter runs when its plugin is installed.
+
+- **pytest-verifier**: `verify.*` checks become "Verify …" lines
+  ([references/checks.md](references/checks.md)).
+- **pytest-strategies**: the report shows each case's seed and the row it ran
+  (`directed: youngest`); the procedure's parameter table shows what each
+  argument draws from (`integer 0 … 120`) instead of the sampled values.
+- **pytest-xdist** (`-n 4`): workers record, the main process writes one record
+  and one set of documents. Tests of a worker that crashed are missing.
+- A plugin can follow steps without importing stepdoc: implement
+  `pytest_stepdoc_step_started(item, step)`, `pytest_stepdoc_step_finished(item,
+  step)` or `pytest_stepdoc_record_ready(config, record)` with
+  `@pytest.hookimpl(optionalhook=True)`. They are called only while stepdoc records.
+- A package ships its own adapter as an entry point in the `stepdoc.adapters`
+  group (a subclass of `stepdoc.adapters.Adapter`).
+
+This skill is installed and updated with `stepdoc skill install` (`stepdoc skill
+status` says whether a copy is outdated).
 
 ## Without pytest
 

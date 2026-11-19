@@ -134,6 +134,9 @@ class Each:
     values: list[Any] = field(default_factory=list)
     """The value each item's check got, in item order; at most ``EACH_VALUES``
     (the first and the last half) when there are more."""
+    texts: Optional[list[Optional[str]]] = None
+    """The producer's text of each of ``values`` (``Check.actual_text``:
+    ``"0x0040"``), None where an item has none; None when no item has one."""
 
 
 #: Most item values an ``Each`` keeps: the first and the last half of them.
@@ -182,6 +185,12 @@ class Check:
     (CHK-11): ``children`` then holds only the items that failed."""
     index: Optional[int] = None
     """For a child of a folded check: the item's position, from 0."""
+    actual_text: Optional[str] = None
+    """``actual`` as the producer shows it, when that is not its ``repr``: a
+    register in hex (``0x00F0``). The report's ``got …`` uses it."""
+    difference: Optional[str] = None
+    """What differs, as a short clause the report adds to a failed check's result:
+    ``bits [1:0] differ: MODE [3:1] is 0b000, expected 0b001``."""
     note_from_comment: bool = field(default=False, repr=False, compare=False)
     """Look up ``note`` from a source comment when the recorder resolves (asserts
     and adapters' checks set it; ``stepdoc_comment_notes = false`` turns it off)."""

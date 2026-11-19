@@ -7,7 +7,7 @@ stepdoc records checks; it never compares values itself. A check is one of:
 | Plain `assert` | `assert r.status_code == 201` |
 | One-line step | `step("PLL locked", check=dev.map.status.pll_locked)` |
 | Callable | `step("Queue empty", check=lambda: queue.size() == 0)` |
-| `stepdoc.Check` | `stepdoc.attach_check(Check("Output in range", passed=ok, expected=1.65, actual=v))` |
+| `stepdoc.Check` | `stepdoc.attach_check(stepdoc.Check("Output in range", passed=ok, expected=1.65, actual=v))` |
 | Converted object | anything a `register_check_converter` predicate accepts |
 
 ## Plain assert
@@ -31,10 +31,11 @@ assert ctl.tx == 0  # room for commands
 ```
 
 reads `Verify dev.block.esmi<channel>_32dat.txfe == 1 (CMD FIFO empty)` and
-`Verify ctl.tx == 0 (room for commands)`. `TODO`, `FIXME`, `noqa`, `type:`,
-`pragma`, `fmt:` and similar markers (also after the note: `# FIFO empty  # noqa`),
-empty comments, commented-out code and comments indented deeper than the check
-are not notes. Write these comments for the reader of the procedure. Turn the
+`Verify ctl.tx == 0 (room for commands)`. Comments that start with a developer
+marker (`TODO`, `FIXME`, `XXX`, `HACK`, `noqa`, `pragma`, `type:`, `fmt:`,
+`pylint:`, `isort:`, `mypy:`, `pyright:`, `ruff:`; a marker after the note is cut
+off: `# FIFO empty  # noqa`), empty comments, commented-out code and comments
+indented deeper than the check are not notes. Write these comments for the reader of the procedure. Turn the
 lookup off with `stepdoc_comment_notes = false`.
 
 ## pytest-verifier
@@ -44,10 +45,12 @@ verify adapter: each becomes a "Verify …" line in the step it ran in. Don't wr
 them in `check=` or `attach_check`. Give the expected value as a name or an
 expression (`verify.equal(r.json()["age"], age, name="Stored age")`) so the
 procedure reads `== <age>` instead of one run's number. If the procedure shows
-`?` steps, the adapter is off (`stepdoc_adapters`).
+`?` steps, the adapter is off (`stepdoc_adapters`). Operand names, the words of
+an `all_satisfy` line, `bits` and hex values need pytest-verifier 0.11 or newer;
+with an older one the checks read as pytest-verifier describes them.
 
-Comparisons (`equal`, `not_equal`, `approx`, `greater…`, `less…`, `between`) and
-`is_true`, `is_false`, `is_none`, `is_not_none` start with the checked value. A
+Comparisons (`equal`, `not_equal`, `approx`, `greater…`, `less…`, `between`),
+`bits` and `is_true`, `is_false`, `is_none`, `is_not_none` start with the checked value. A
 register read on the check's line is folded into it and named by its target,
 with the variable parts of a `getattr(..., f"reg{ch}")` alias kept symbolic:
 
@@ -109,9 +112,72 @@ report      Verify tb.dev.map.block.reg3.F == wdata (243) -> got 240 ✗
   on separate lines.
 - `name=` is still allowed: `Verify 'Stored word': tb.dev.map.block.reg<channel>.F == <wdata>`.
 - `actual_name=` is on every check of one value; `expected_name=` on `equal`,
-  `not_equal`, `approx`, `greater…`, `less…` and `length`.
+  `not_equal`, `approx`, `greater…`, `less…`, `length` and `bits`.
 - HTML shows the checked expression, comparison and operand names in monospace;
   `name=` and notes stay prose.
+
+### Registers: hex values and the bits that differ
+
+pytest-verifier 0.11 shows integers in a format when the check has `radix=` or
+`width=`, is a `verify.bits`, or checks a value whose class has
+`__verify_format__`. The report then shows the value the check got in that
+format, and for a failed `equal` or `bits` the bits (and named fields) that
+differ:
+
+```python
+verify.equal(dev.CTRL.value, wdata, radix="hex", width=16)
+verify.bits(dev.CTRL.value, wdata, mask=MASK, fields={"EN": 0, "MODE": (3, 1)}, width=16)
+```
+
+```text
+procedure   Verify dev.CTRL == <wdata>
+            Verify dev.CTRL & <MASK> == <wdata>
+report      Verify dev.CTRL == 0xABF3 -> got 0x12F0, bit 15, bits [13:11], bit 8 and bits [1:0] differ ✗
+            Verify dev.CTRL & 0x00FF == 0x00F3 -> got 0x12F0, bits [1:0] differ: EN [0] is 0b0, expected 0b1; MODE [3:1] is 0b000, expected 0b001 ✗
+```
+
+- Give the expected value and the mask as names (a parameter, a constant): the
+  procedure then shows `<wdata>` and `<MASK>` and no value of the run. A literal
+  is shown as pytest-verifier writes it (`& 0x00FF == 0x00F3`) when the call
+  fixes the format: `radix=` and `width=` are literals where given, and the
+  check has no width or radix the call does not give.
+- When the format depends on the run (`width=width`, or the width a value's
+  `__verify_format__` gives: `verify.equal(reg.read(), 0xF3)`), the procedure
+  shows a literal as the test wrote it (`reg.read() == 0xF3`), so registers of
+  different widths share one procedure. Write such literals the way they should
+  read. A mask or expected value passed through `**kwargs` reads `<mask>`,
+  `<expected>`.
+- A checked value that binds more loosely than `&` is put in parentheses:
+  `verify.bits(dev.CTRL.value | 1, wdata, mask=MASK)` reads `(dev.CTRL.value |
+  1) & <MASK> == <wdata>`.
+- In a loop, a `verify.*` check is one line per pass (in a plain loop and in
+  `stepdoc.repeat`): its checks are placed after the phase, so they are not part
+  of the collapsed "Repeat". Check once after the loop, or collect the values
+  and use `verify.all_satisfy` (one line, below).
+- The report shows the expected value under the mask (`0x00F3` for `0xABF3`
+  under `0x00FF`), as pytest-verifier does. Beside a mask given by name, the
+  procedure shows a literal expected value whole (`& <MASK> == 0xABF3`).
+- `name=`, `actual_name=` and `expected_name=` work as on `equal`:
+  `Verify 'Low byte': dev.CTRL & 0x00FF == <wdata>`.
+- The procedure never shows the value got or what differs. A passed check shows
+  its value (`-> got 0x12F0 ✓`) and no difference.
+- Without a format the report shows the value as Python does (`-> got 240`).
+  The line of a read is the bridge's, so a read on its own line stays
+  `Read dev.CTRL -> 4848`; read on the check's line, it is folded into the check.
+- pytest-verifier's `detail` text is not printed; it is in the run record.
+
+### Other verify checks
+
+- `contains`, `not_contains`, `length`, `matches` and `is_instance` keep the name
+  in quotes, also an automatic one: `Verify 'items' contains <n>`, `Verify 's'
+  matches /^v\d/`. Give them a `name=` that reads well.
+- `conditional` and `guard` are one line with the branch taken and no line for
+  the check inside: `Verify 'Mode' [mode=3] [→ 3]`.
+- `eventually` and `stable` show the kept try's check as a child line.
+- `raises` reads `Verify 'Bad word' raises ValueError`; `fail` reads `Verify
+  FAIL: <msg>`; each row of `verify.limits` is a line of its own, named by the
+  row (`Verify 'CTRL' & 0x00FF == 0x00F3`).
+- `verify.section` titles are not shown: use `step()` for structure.
 
 ## One check per item: `verify.all_satisfy`
 
@@ -126,6 +192,12 @@ verify.all_satisfy(waveforms, lambda w: verify.equal(w & INDEX_ERROR_BIT, 0), na
   variable are the words of the line (`for each item, ...` without them).
 - Leave `name=` off the item's check: the line uses the `all_satisfy`'s name.
 - Items checked differently (other check type, name or expression) stay one line each.
+- A dry run says `-> 12 items`. A failed item's line shows its value as the
+  check does (`item [1]: r == 0x01 -> got 0x02, bits [1:0] differ`).
+- Run record: the line's check has `each` (`count`, `failed`, `item`, `items`,
+  `values`: what each item's check got, the first and last 32 of more than 64;
+  `texts`: the same values as the checks show them, when they have a format) and
+  its `children` are the failed items, each with its `index`.
 
 ## step(check=...)
 

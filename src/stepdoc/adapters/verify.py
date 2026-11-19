@@ -10,6 +10,11 @@ renders expected values given by name symbolically in the procedure
 in the procedure (``tb.dev.map.block.reg<channel>.F == <wdata>``), this run's in
 the report (``tb.dev.map.block.reg3.F == wdata (243)``).
 
+A check that shows its values in a format (``radix=``, ``width=``, ``bits``, a
+value with ``__verify_format__``) carries pytest-verifier's own text of the value
+it got (``0x00F0``) and of the bits that differ, which the report shows in place
+of stepdoc's rendering: ``-> got 0x00F0, bits [1:0] differ``.
+
 Without this adapter, stepdoc cannot see verify's checks, so no step of a test
 that uses verify is shown as passed (NFR-7).
 """
@@ -19,7 +24,7 @@ from __future__ import annotations
 import ast
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, Iterator, Mapping, Optional, Sequence
 
@@ -102,7 +107,7 @@ _METHODS: dict[str, str] = {"true": "is_true", "false": "is_false"}
 _SUBJECTS = frozenset(
     {
         "equal", "not_equal", "approx", "greater", "greater_equal", "less", "less_equal",
-        "between", "true", "false", "is_none", "is_not_none",
+        "between", "true", "false", "is_none", "is_not_none", "bits",
     }
 )
 
@@ -128,20 +133,24 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         index = d["matched_index"]
         if 0 <= index < len(branches):
             selected = branches[index].get("label")
+    kind = str(d.get("check_type"))
     rest = _rest(description, d.get("name"))
     actual = _operand(d, "actual_name") if rest is not None else None
-    expected = _named_expected(d, rest) if rest is not None else None
     # With an operand name the automatic name is that name, not the source text:
     # calls sharing a line are then told apart by their ``actual_name=``.
     hint = _hint(d) if actual is None else None
     spelled = None if actual is None else actual["concrete"]
+    expected_name = None
     sym_rest = None
-    if rest is not None:
+    if rest is not None and kind == "bits":
+        expected_name, sym_rest = _bits_rest(d, rest, location, hint, spelled)
+    elif rest is not None:
+        expected = _named_expected(d, rest)
         if expected is not None:
-            sym_rest = expected[1]
+            expected_name, sym_rest = expected
         else:
             sym_rest = _symbolic_rest(d, rest, location, hint, spelled)
-    operands = {k: v for k, v in (("actual", actual), ("expected", expected and expected[0])) if v}
+    operands = {k: v for k, v in (("actual", actual), ("expected", expected_name)) if v}
     check = Check(
         text=text,
         passed=passed if isinstance(passed, bool) else None,
@@ -155,13 +164,16 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         symbolic_text=None if sym_rest is None else f"'{d.get('name')}' {sym_rest}",
         note=_note(d),
         operands=operands or None,
+        actual_text=_actual_text(d),
+        difference=_difference(d),
     )
     wording = None
-    kind = str(d.get("check_type"))
     prefix = "" if d.get("auto_name") is True else f"'{d.get('name')}': "
     named = None if actual is None else (actual["symbolic"], actual["concrete"])
     if rest is not None and location is not None and kind in _SUBJECTS:
         subject = _subject(location.file, location.line, _METHODS.get(kind, kind), hint, spelled)
+        if subject is not None and kind == "bits":
+            subject = _grouped(subject, masked=rest.startswith("& "))
         if subject is not None:
             wording = _Wording(prefix, rest, sym_rest, subject, named)
             wording.apply(check, subject.symbolic, subject.concrete)
@@ -174,6 +186,49 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
     if kind == "all_satisfy":
         _fold_each(check, d)
     return check, wording
+
+
+def _actual_text(d: Mapping[str, Any]) -> Optional[str]:
+    """pytest-verifier's own text of the value a check got, when the check shows
+    its values in a format (``rendered["actual"]``: ``0x00F0``); else None."""
+    rendered = d.get("rendered")
+    return _line(rendered.get("actual")) if isinstance(rendered, Mapping) else None
+
+
+_FIELDS_SHOWN = 6
+"""Most differing fields a ``difference`` names, as pytest-verifier's detail does."""
+
+
+def _difference(d: Mapping[str, Any]) -> Optional[str]:
+    """What differs in a failed check, from the record's ``bit_diff``: the clause
+    pytest-verifier's detail ends with, ``bits [1:0] differ: MODE [3:1] is 0b000,
+    expected 0b001``. None without one, or when it has another shape."""
+    diff = d.get("bit_diff")
+    text = _line(diff.get("text")) if isinstance(diff, Mapping) else None
+    if text is None:
+        return None
+    assert isinstance(diff, Mapping)
+    fields = diff.get("fields")
+    parts = []
+    for f in fields if isinstance(fields, (list, tuple)) else ():
+        if not isinstance(f, Mapping):
+            return text
+        name, got, want = _line(f.get("name")), _line(f.get("actual")), _line(f.get("expected"))
+        msb, lsb = f.get("msb"), f.get("lsb")
+        if None in (name, got, want) or not _is_int(msb) or not _is_int(lsb):
+            return text
+        span = f"[{msb}]" if msb == lsb else f"[{msb}:{lsb}]"
+        parts.append(f"{name} {span} is {got}, expected {want}")
+    more = diff.get("more_fields")
+    hidden = len(parts) - _FIELDS_SHOWN + (more if isinstance(more, int) and more > 0 else 0)
+    parts = parts[:_FIELDS_SHOWN]
+    if parts and hidden > 0:
+        parts.append(f"and {hidden} more")
+    return f"{text}: {'; '.join(parts)}" if parts else text
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _fold_each(check: Check, d: Mapping[str, Any]) -> None:
@@ -216,6 +271,7 @@ def _fold_each(check: Check, d: Mapping[str, Any]) -> None:
         item=item,
         items=items,
         values=[k.actual for k in shown],
+        texts=[k.actual_text for k in shown] if any(k.actual_text for k in shown) else None,
     )
     check.children = failed
 
@@ -281,12 +337,70 @@ def _named_expected(d: Mapping[str, Any], rest: str) -> Optional[tuple[dict[str,
     tolerance = "" if kind != "approx" else _tolerance(d, rest, f"{op} {name['concrete']} (")
     if tolerance is None:
         return None
-    generic = name["symbolic"]
-    # Variable parts pytest-verifier found, or ``<parts>`` written in the name.
-    parts = generic != name["concrete"] or _PLACEHOLDER.search(generic) is not None
-    shown = generic if parts else f"<{generic}>"
     units = f" {d['units']}" if d.get("units") else ""
-    return name, f"{op} {shown}{units}{tolerance}"
+    return name, f"{op} {_generic(name)}{units}{tolerance}"
+
+
+def _generic(name: Mapping[str, str]) -> str:
+    """An expected value's operand name as the procedure shows it: ``<wdata>``; a
+    name with variable parts (the ones pytest-verifier found, or ``<parts>``
+    written in it) as it is, ``limits[<channel>]``."""
+    generic = name["symbolic"]
+    parts = generic != name["concrete"] or _PLACEHOLDER.search(generic) is not None
+    return generic if parts else f"<{generic}>"
+
+
+# What follows the checked value of a ``bits`` check: ``& 0x00FF == 0x00F3``, or
+# ``== 0x00F3`` without a mask.
+_BITS = re.compile(r"(?:& (?P<mask>\S+) )?== (?P<expected>.+)\Z", re.DOTALL)
+
+
+def _bits_rest(
+    d: Mapping[str, Any],
+    rest: str,
+    loc: Optional[Location],
+    hint: Optional[str],
+    spelled: Optional[str],
+) -> tuple[Optional[dict[str, str]], Optional[str]]:
+    """For a ``bits`` check (``<value> & <mask> == <expected>``): the expected
+    value's operand name, if it has one, and the text after the checked value for
+    the procedure, or None when ``rest`` holds no value of this run.
+
+    The expected value reads as its operand name (``== <wdata>``), else as its
+    source when that is not a literal; the mask as its source when that is not a
+    literal (``& <mask> ==``). A literal stays as pytest-verifier wrote it when
+    the call fixes the format, else as the test wrote it (:func:`_expected`).
+    pytest-verifier shows the expected value under the mask (``0x00F3`` for
+    ``0xABF3`` under ``0x00FF``), which depends on the mask: beside a mask given
+    by name, a literal expected value is shown whole (``rendered["expected"]``)."""
+    m = _BITS.match(rest)
+    if m is None:
+        return None, None
+    name = _operand(d, "expected_name")
+    syms = None
+    if loc is not None:
+        syms = _expected(loc.file, loc.line, "bits", hint, spelled, _format(d) or (None, None))
+    expected_sym, mask_sym = syms or (None, None)
+    mask = m["mask"]
+    generic_mask = mask if mask is None or mask_sym is None else mask_sym
+    expected = _generic(name) if name is not None else expected_sym
+    if expected is None:
+        if generic_mask == mask:
+            return name, None  # literals only, in a format the call fixes
+        rendered = d.get("rendered")
+        whole = _line(rendered.get("expected")) if isinstance(rendered, Mapping) else None
+        expected = whole or m["expected"]
+    head = "" if generic_mask is None else f"& {generic_mask} "
+    return name, f"{head}== {expected}"
+
+
+def _format(d: Mapping[str, Any]) -> Optional[tuple[Optional[str], Optional[int]]]:
+    """The format a check shows its values in, ``(radix, width)`` as the record has
+    them; None for a check without one (it reads as it always did)."""
+    radix, width = d.get("radix"), d.get("width")
+    if not isinstance(radix, str) and not isinstance(d.get("rendered"), Mapping):
+        return None
+    return (radix if isinstance(radix, str) else None, width if _is_int(width) else None)
 
 
 def _tolerance(d: Mapping[str, Any], rest: str, head: str) -> Optional[str]:
@@ -322,7 +436,7 @@ def _rest(description: str, name: Any) -> Optional[str]:
     return m.group(1) if m else None
 
 
-_DESCRIPTION = re.compile(r"Verify '.*?' ((?:==|!=|>=|<=|>|<|∈|is) .*)\Z", re.DOTALL)
+_DESCRIPTION = re.compile(r"Verify '.*?' ((?:==|!=|>=|<=|>|<|∈|is|&) .*)\Z", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -343,6 +457,28 @@ class _Subject:
     """The variable, when the checked value is a bare name (``v``)."""
     exprs: frozenset[str] = frozenset()
     """Every expression in the call, unparsed: the reads it may absorb."""
+    loose: int = 0
+    """How loosely the expression binds: 2 when ``<it> == x`` would read as
+    another expression (a comparison, ``and``/``or``/``not``, a conditional, a
+    lambda, ``:=``), 1 when only ``<it> & x`` would (``|``, ``^``), else 0."""
+
+
+def _loose(node: ast.expr) -> int:
+    if isinstance(node, (ast.Compare, ast.BoolOp, ast.IfExp, ast.Lambda, ast.NamedExpr)):
+        return 2
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return 2
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.BitOr, ast.BitXor)):
+        return 1
+    return 0
+
+
+def _grouped(subject: _Subject, masked: bool) -> _Subject:
+    """The checked value of a ``bits`` check in parentheses when the line would
+    otherwise state another expression: ``(a | 1) & 0x00FF == 0x00F3``."""
+    if subject.loose < (1 if masked else 2):
+        return subject
+    return replace(subject, symbolic=f"({subject.symbolic})", concrete=f"({subject.concrete})")
 
 
 def _hint(d: Mapping[str, Any]) -> Optional[str]:
@@ -428,6 +564,7 @@ def _subject(
             span=(call.lineno, call.end_lineno or call.lineno),
             name=node.id if isinstance(node, ast.Name) else None,
             exprs=frozenset(ast.unparse(n) for n in ast.walk(call) if isinstance(n, ast.expr)),
+            loose=_loose(node),
         )
     except Exception:  # pragma: no cover - defensive: documents never break a run
         return None
@@ -460,45 +597,138 @@ def _symbolic_rest(
 ) -> Optional[str]:
     """The text after the name for the procedure when the expected value is a name
     or an expression (``== <age>``); None when it is a literal (``rest`` already
-    reads right)."""
+    reads right). In a check that shows its values in a format, a literal reads
+    as the test wrote it unless the call fixes the format (:func:`_expected`)."""
     kind = str(d.get("check_type"))
     if loc is None or (kind != "between" and kind not in _COMPARISONS):
         return None
-    syms = _expected(loc.file, loc.line, kind, hint, spelled)
+    syms = _expected(loc.file, loc.line, kind, hint, spelled, _format(d))
     if syms is None:
         return None
-    units = f" {d['units']}" if d.get("units") else ""
+    units = str(d["units"]) if d.get("units") else ""
     if kind == "between":
         lo, hi = syms
         bounds = rest[rest.index("∈") + 1:].strip() if "∈" in rest else ""
         concrete = [b.strip() for b in bounds[1:-1].split(",")] if bounds[:1] in "[(" else []
         if len(concrete) != 2:
             return None
-        lo_text, hi_text = (lo + units if lo else concrete[0]), (hi + units if hi else concrete[1])
+        lo_text = _with_units(lo, units) if lo else concrete[0]
+        hi_text = _with_units(hi, units) if hi else concrete[1]
         return f"∈ {bounds[0]}{lo_text}, {hi_text}{bounds[-1]}"
     op = _COMPARISONS[kind][0]
     tolerance = rest[rest.index(" ±"):] if kind == "approx" and " ±" in rest else ""
-    return f"{op} {syms[0]}{units}{tolerance}"
+    assert syms[0] is not None
+    return f"{op} {_with_units(syms[0], units)}{tolerance}"
+
+
+def _with_units(text: str, units: str) -> str:
+    """A value of the procedure with its units: after a space when it is given by
+    name (``<limit> LSB``), right after a literal, as pytest-verifier writes a
+    number (``0x100LSB``)."""
+    if not units:
+        return text
+    return f"{text} {units}" if text.startswith("<") else f"{text}{units}"
+
+
+def _spread(call: ast.Call) -> bool:
+    """Whether the call takes arguments from ``*args`` or ``**kwargs``: what an
+    argument that is not written in it may then be is not in the source."""
+    return any(kw.arg is None for kw in call.keywords) or any(
+        isinstance(a, ast.Starred) for a in call.args
+    )
+
+
+def _passed(call: ast.Call, position: Optional[int], keyword: str) -> Optional[ast.expr]:
+    """The argument written in the call for ``keyword`` (or at ``position``, when
+    no ``*args`` comes before it); None when it is not written there."""
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    if position is None or len(call.args) <= position:
+        return None
+    if any(isinstance(a, ast.Starred) for a in call.args[: position + 1]):
+        return None
+    return call.args[position]
+
+
+def _literal(node: Optional[ast.expr]) -> Any:
+    """The value of a literal argument; ``...`` for an argument that is not one,
+    None for one that is not written (or is ``None``)."""
+    if node is None:
+        return None
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return ...
+
+
+def _fixed(call: ast.Call, kind: str, radix: Optional[str], width: Optional[int]) -> bool:
+    """Whether the call alone says how the check shows its integers, so that every
+    run of it shows a literal the same way: ``radix=`` and ``width=`` are literals
+    where written, and account for the record's format. A width the call does not
+    give, or a radix that is not the one the call implies (hex, for ``bits`` and
+    beside a ``width=``), came from the value (``__verify_format__``): another
+    run's value may say otherwise."""
+    if _spread(call):
+        return False
+    given_radix = _literal(_passed(call, None, "radix"))
+    given_width = _literal(_passed(call, None, "width"))
+    if given_radix is ... or given_width is ...:
+        return False
+    if given_width is None and width is not None:
+        return False
+    if given_radix is None:
+        return radix is None or (radix == "hex" and (kind == "bits" or given_width is not None))
+    return True
 
 
 @lru_cache(maxsize=4096)
 def _expected(
-    path: str, line: int, kind: str, hint: Optional[str] = None, spelled: Optional[str] = None
+    path: str,
+    line: int,
+    kind: str,
+    hint: Optional[str] = None,
+    spelled: Optional[str] = None,
+    shown: Optional[tuple[Optional[str], Optional[int]]] = None,
 ) -> Optional[tuple[Optional[str], ...]]:
     """The expected value's ``<source>`` at a call site (``(low, high)`` for
-    ``between``), once per line; None when every one is a literal."""
+    ``between``, ``(expected, mask)`` for ``bits``), once per line; None when
+    every one is a literal.
+
+    ``shown`` is the format of a check that shows its values in one (radix and
+    width, from the record). pytest-verifier's text of a literal then depends on
+    that format, ``0x00F3`` at 16 bits and ``0x0F3`` at 12, so it stays only when
+    the call fixes the format (:func:`_fixed`). Otherwise an integer literal reads
+    as the test wrote it (``0xF3``), and a value passed through ``**kwargs`` or
+    ``*args`` as ``<its parameter>`` (``<mask>``): no value of the run is in the
+    procedure, whatever the value checked says of its format."""
     call = _call(path, line, _METHODS.get(kind, kind), hint, spelled)
     if call is None:
         return None
+    wanted: tuple[tuple[Optional[int], str], ...]
     if kind == "between":
-        low, high = argument(call, 1, "low"), argument(call, 2, "high")
-        lo = symbolic(path, low) if low is not None else None
-        hi = symbolic(path, high) if high is not None else None
-        return None if lo is None and hi is None else (lo, hi)
-    _, position, keyword = _COMPARISONS[kind]
-    node = argument(call, position, keyword)
-    sym = symbolic(path, node) if node is not None else None
-    return None if sym is None else (sym,)
+        wanted = ((1, "low"), (2, "high"))
+    elif kind == "bits":
+        wanted = ((1, "expected"), (None, "mask"))
+    else:
+        wanted = (_COMPARISONS[kind][1:],)
+    if shown is None:
+        nodes = [argument(call, 99 if at is None else at, kw) for at, kw in wanted]
+        found = tuple(symbolic(path, node) if node is not None else None for node in nodes)
+        return None if all(sym is None for sym in found) else found
+    fixed = _fixed(call, kind, *shown)
+    spread = _spread(call)
+    texts: list[Optional[str]] = []
+    for at, keyword in wanted:
+        node = _passed(call, at, keyword)
+        if node is None:
+            texts.append(f"<{keyword}>" if spread else None)
+            continue
+        sym = symbolic(path, node)
+        if sym is None and not fixed and _is_int(_literal(node)):
+            sym = source_text(path, node)
+        texts.append(sym)
+    return None if all(text is None for text in texts) else tuple(texts)
 
 
 class _Placer:

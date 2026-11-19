@@ -309,10 +309,19 @@ def test_user(name, age):
 '''
 
 
-def test_strategies_seed_rows_and_domains(pytester):
+def test_strategies_seed_rows_and_domains(pytester, monkeypatch):
     pytester.makepyfile(pytest_strategy=FAKE_STRATEGIES, test_new=STRATEGY_TESTS)
+    # Where pytest-strategies is installed, its entry point has the fake's name and
+    # would load in its place (and fail: the fake module shadows the package). So
+    # no entry point is loaded on its own, and the conftest registers the fake.
+    pytester.makeconftest(
+        "import pytest_strategy\n\n\n"
+        "def pytest_addhooks(pluginmanager):\n"
+        '    pluginmanager.register(pytest_strategy, "pytest_strategy")\n'
+    )
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     result = pytester.runpytest_subprocess(
-        "-p", "no:cacheprovider", "-p", "pytest_strategy", "--stepdoc-record=run.json",
+        "-p", "no:cacheprovider", "-p", "stepdoc", "--stepdoc-record=run.json",
         "--stepdoc-procedure=procedure.md", "--stepdoc-report=report.md",
     )
     result.assert_outcomes(passed=2)

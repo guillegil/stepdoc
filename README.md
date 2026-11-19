@@ -114,8 +114,10 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
      1.2. Read dev.fifo.status.empty                  (the test that ended the loop)
   ```
 
-  Passing checks made in every pass are part of it. A pass that does something
-  else (a failed check, another value written) ends the loop and is shown as it
+  Passing checks made in every pass are part of it (`assert`s; a pytest-verifier
+  check is placed after its phase and stays one line per pass: check once after
+  the loop, or the collected values with `verify.all_satisfy`). A pass that does
+  something else (a failed check, another value written) ends the loop and is shown as it
   ran, after it. Wrap the loop in `stepdoc.repeat(...)` to say what it does and
   what it waits for. With a title the block is a step of its own, at the top
   level or inside another step:
@@ -330,6 +332,52 @@ the plugin already publishes:
   `failed`, `item`, `items` and the `values` the items' checks got, at most the
   first and last 32) and its `children` are the failed items, each with its
   `index`.
+
+  Register checks read as pytest-verifier shows them (pytest-verifier 0.11+). A
+  check with `radix=` or `width=`, a `verify.bits`, or a check of a value whose
+  class has `__verify_format__` shows its values in hex (or binary, octal), and
+  the report shows the value it got the same way, then the bits that differ:
+
+  ```python
+  verify.equal(dev.CTRL.value, wdata, radix="hex", width=16)
+  verify.bits(dev.CTRL.value, wdata, mask=MASK, fields={"EN": 0, "MODE": (3, 1)}, width=16)
+  ```
+
+  ```text
+  procedure   Verify dev.CTRL == <wdata>
+              Verify dev.CTRL & <MASK> == <wdata>
+  report      Verify dev.CTRL == 0xABF3 -> got 0x12F0, bit 15, bits [13:11], bit 8 and bits [1:0] differ ✗
+              Verify dev.CTRL & 0x00FF == 0x00F3 -> got 0x12F0, bits [1:0] differ: EN [0] is 0b0, expected 0b1; MODE [3:1] is 0b000, expected 0b001 ✗
+  ```
+
+  A `bits` check reads `<value> & <mask> == <expected>` (`<value> == <expected>`
+  without a mask) and starts with the checked value like the comparisons; it
+  takes `name=`, `actual_name=` and `expected_name=` the same way. In the
+  procedure an expected value or a mask given by name is `<wdata>`, `<MASK>`; a
+  literal is as pytest-verifier writes it (`& 0x00FF == 0x00F3`) when the call
+  fixes the format: `radix=` and `width=` are literals where given, and the
+  record has no width or radix the call does not give. A format that depends on
+  the run (a `width=` that is a variable, or the width a value's
+  `__verify_format__` gives, as in `verify.equal(reg.read(), 0xF3)`) would pad
+  the literal differently from case to case, so the procedure then shows it as
+  the test wrote it (`reg.read() == 0xF3`, `& 0xFF == 0xABF3`), and a mask or
+  expected value passed through `**kwargs` as `<mask>`, `<expected>`. A checked
+  value that binds more loosely than `&` is put in parentheses
+  (`(dev.CTRL.value | 1) & <MASK> == <wdata>`). The report
+  shows the expected value under the mask, as pytest-verifier does; beside a
+  mask given by name, the procedure shows a literal expected value whole
+  (`& <MASK> == 0xABF3`), since what is left under the mask depends on the run.
+  The procedure never shows the value a check got or what differs, so cases
+  with different values still share one procedure. A passed check shows its
+  value and no difference; a check without a format shows its value as before
+  (`-> got 240`). The line of a read made on its own line is the bridge's and
+  stays as it is (`Read dev.CTRL -> 4848`). The folded `all_satisfy` line lists
+  a failed item the same way (`item [1]: r == 0x01 -> got 0x02, bits [1:0]
+  differ ✗`). In the run record such a check has `actual_text` (`"0x12F0"`) and,
+  when it failed on bits, `difference`; `each` has `texts` beside `values`.
+  Steps handed to other plugins carry them as `Check.actual_text`,
+  `Check.difference` and `Each.texts`, and any adapter or
+  `stepdoc.Check(...)` may set them.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.

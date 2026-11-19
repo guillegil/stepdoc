@@ -15,6 +15,9 @@ collect the procedure without judging results.
 
 - Every check is recorded as not judged. A failing assert inside a step is
   recorded and swallowed, so later steps are still documented.
+- pytest-verifier still judges its checks: the documents show them as not
+  judged, but a failing `verify.*` check still fails the test. Make the
+  simulated backend return values that pass.
 - Without the option, `stepdoc_dry_run` is `False` and nothing changes.
 
 ## Known limits
