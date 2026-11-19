@@ -25,7 +25,7 @@ from typing import Any, Iterator, Mapping, Optional, Sequence
 
 import pytest
 
-from ..core.model import Action, Check, Location, Repeat, Section, Step
+from ..core.model import EACH_VALUES, Action, Check, Each, Location, Repeat, Section, Step
 from ..core.recorder import Recorder
 from ..core.symbolic import target_pattern
 from . import Adapter, Host
@@ -171,7 +171,63 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
     if isinstance(name, str) and name and d.get("auto_name") is not True:
         if check.text.startswith((f"'{name}': ", f"'{name}' ")):
             check.label = name
+    if kind == "all_satisfy":
+        _fold_each(check, d)
     return check, wording
+
+
+def _fold_each(check: Check, d: Mapping[str, Any]) -> None:
+    """One line for an ``all_satisfy`` whose children all read the same (CHK-11):
+    ``'Index error': for each w in waveforms, w & INDEX_ERROR_BIT == 0``. Only the
+    failed children stay, each with its ``index``. Children of different kinds,
+    names or code, composite children, and a check that could not make them all
+    (``error``) are left as they are."""
+    kids = check.children
+    raw = [c for c in d.get("child_checks") or [] if isinstance(c, Mapping)]
+    if not kids or len(raw) != len(kids) or d.get("error") is not None:
+        return
+    if len({str(c.get("check_type")) for c in raw}) != 1 or any(k.children for k in kids):
+        return
+    shapes = {(k.label, _item_code(k, True)) for k in kids}
+    if len(shapes) != 1:
+        return
+    symbolic = shapes.pop()[1]
+    concrete = {_item_code(k, False) for k in kids}
+    item, items = _line(d.get("item_name")), _line(d.get("items_name"))
+    lead = f"for each {item or 'item'}" + (f" in {items}" if items else "") + ", "
+    name = _line(d.get("name")) or "all items"
+    head = f"'{name}': "
+    check.text = head + lead + (concrete.pop() if len(concrete) == 1 else symbolic)
+    sym_text = head + lead + symbolic
+    check.symbolic_text = None if sym_text == check.text else sym_text
+    check.label = name
+    check.operands = None
+    notes = {k.note for k in kids}
+    if check.note is None and len(notes) == 1:
+        check.note = notes.pop()  # the one note every item's check carries
+    failed = [k for k in kids if k.passed is False]
+    for i, k in enumerate(kids):
+        k.index = i
+    half = EACH_VALUES // 2
+    shown = kids if len(kids) <= EACH_VALUES else kids[:half] + kids[-half:]
+    check.each = Each(
+        count=len(kids),
+        failed=len(failed),
+        item=item,
+        items=items,
+        values=[k.actual for k in shown],
+    )
+    check.children = failed
+
+
+def _item_code(c: Check, symbolic: bool) -> str:
+    """The text of one item's check without its own name, which the folded line
+    replaces with the composite's: ``w & INDEX_ERROR_BIT == 0``. A name that is the
+    subject itself (``'Vout' == 3.3``) stays."""
+    text = (c.symbolic_text or c.text) if symbolic else c.text
+    if c.label and text.startswith(f"'{c.label}': "):
+        return text[len(c.label) + 4:]
+    return text
 
 
 # Check types that take ``expected_name=``: all of them are in _COMPARISONS.

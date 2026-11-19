@@ -370,19 +370,16 @@ def test_composite_children_and_dry_run(project):
     run(project).assert_outcomes(passed=1)
     procedure = numbered(project, "procedure.txt")
     report = numbered(project, "report.txt")
-    assert [line.strip() for line in procedure if line.strip().startswith("- ")] == [
-        "- Verify reg<ch>.F == <wdata>", "- Verify reg<ch>.F == <wdata>",
-    ]
-    assert [line.strip() for line in report if line.strip().startswith("- ")] == [
-        "- Verify reg0.F == wdata (243) -> got 243   ✓",
-        "- Verify reg1.F == wdata (243) -> got 243   ✓",
-    ]
+    # One check per item is one line (CHK-11).
+    line = "1.1. Verify 'Every register': for each ch in [0, 1], reg<ch>.F == <wdata>"
+    assert procedure[-1].strip() == line
+    assert report[-1].strip() == line + " -> 2 of 2 passed   ✓"
     record_of(project)
     # Dry run: the same procedure, nothing judged in the report.
     run(project, "--stepdoc-dry-run")
     assert numbered(project, "procedure.txt") == procedure
     dry = numbered(project, "report.txt")
-    assert "      - Verify reg0.F == wdata (243) -> got 243   ·" in dry
+    assert dry[-1].strip() == line + " -> 2 items   ·"
     record_of(project)
 
 

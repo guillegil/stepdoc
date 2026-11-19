@@ -304,6 +304,32 @@ the plugin already publishes:
   comparison, operand names) is monospace, `<code class="expr">`, in the
   system's own monospace font; a name given with `name=` and the note stay in
   the text font. Markdown puts the same code between backticks.
+
+  `verify.all_satisfy` makes one check per item. When every item's check reads
+  the same, the procedure shows them as one line, like a loop:
+
+  ```python
+  verify.all_satisfy(
+      waveforms,
+      lambda w: verify.equal(w & INDEX_ERROR_BIT, 0),
+      name="Index error clear",
+  )
+  ```
+  ```text
+  1.1. Verify 'Index error clear': for each w in waveforms, w & INDEX_ERROR_BIT == 0
+  ```
+  The report adds `12 of 12 passed`, or `2 of 12 failed` with one line for each
+  item that failed (`item [3]: w & INDEX_ERROR_BIT == 0 -> got 64 ✗`); a passing
+  item is never listed and a failing one is never hidden. `w` is the lambda's
+  parameter and `waveforms` the source of the first argument (pytest-verifier
+  0.11+; before that, or with a `functools.partial` factory, the line reads
+  `for each item, ...`). The line carries the `all_satisfy`'s name; a `name=`
+  on the item's check is left out, and a `note=` every item shares moves to the
+  line. Items checked in different ways (another check, name or expression)
+  stay listed one per line. In the run record the check has `each` (`count`,
+  `failed`, `item`, `items` and the `values` the items' checks got, at most the
+  first and last 32) and its `children` are the failed items, each with its
+  `index`.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.

@@ -163,8 +163,13 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
                 result = "got " + ", ".join(
                     f"{r['target']['concrete']} = {show(r['value']['concrete'])}" for r in reads
                 )
+    each = c.get("each")
+    if not symbolic and isinstance(each, dict) and isinstance(each.get("count"), int):
+        result = each_result(each, c["passed"] is not None)
     code = (c.get("symbolic_text") or c["text"]) if symbolic else c["text"]
     label, code = _split_label(c.get("label"), code)
+    if isinstance(c.get("index"), int):  # CHK-11: one failed item of a folded check
+        label = f"item [{c['index']}]:"
     if c.get("selected"):
         code += f" [→ {c['selected']}]"
     note = c.get("note") or None
@@ -172,6 +177,15 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
         c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note, label=label,
         is_check=True,
     )
+
+
+def each_result(each: Record, judged: bool = True) -> str:
+    """``12 of 12 passed`` or ``2 of 12 failed`` for a folded check (CHK-11);
+    ``12 items`` when it was not judged (a dry run)."""
+    count, failed = each["count"], each.get("failed") or 0
+    if not judged:
+        return f"{count} item{'' if count == 1 else 's'}"
+    return f"{failed} of {count} failed" if failed else f"{count} of {count} passed"
 
 
 def _split_label(label: Any, text: str) -> tuple[Optional[str], str]:
@@ -195,6 +209,8 @@ def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[L
             yield from entry_lines(e["entries"], symbolic, depth + 1)
         elif kind == "check":
             yield check_line(e, symbolic, depth)
+            if symbolic and e.get("each"):
+                continue  # CHK-11: the failed items belong to this run, not the procedure
             for child in e.get("children") or []:
                 yield check_line(child, symbolic, depth + 1)
         else:

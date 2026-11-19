@@ -1,7 +1,7 @@
 """stepdoc core: pure Python, must never import pytest (NFR-2, NFR-9)."""
 
 from . import fmt
-from .model import Action, Check, Location, Repeat, Step
+from .model import Action, Check, Each, Location, Repeat, Step
 from .record import case_record, dumps, load, run_record, to_dict
 from .recorder import (
     CheckTypeError,
@@ -23,6 +23,7 @@ __all__ = [
     "Action",
     "Check",
     "CheckTypeError",
+    "Each",
     "Location",
     "Recorder",
     "Repeat",

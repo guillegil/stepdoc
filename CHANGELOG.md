@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- `verify.all_satisfy` reads as one line (CHK-11). pytest-verifier makes one
+  check per item, which used to be one line per item (twelve times `Verify
+  'Index error': w & INDEX_ERROR_BIT == 0`). When every item's check reads the
+  same, the procedure now shows `Verify 'Index error clear': for each w in
+  waveforms, w & INDEX_ERROR_BIT == 0`, and the report adds `12 of 12 passed`,
+  or `2 of 12 failed` with one line per failed item (`item [3]: ... -> got 64
+  ✗`); a dry run says `12 items`. The words `w` and `waveforms` come from
+  pytest-verifier 0.11's `item_name` and `items_name` (`for each item, ...`
+  without them). The line carries the `all_satisfy`'s name, not the items'
+  `name=`; a note all items share moves to it. Items checked in different ways,
+  composite items and an `all_satisfy` that could not check every item stay
+  listed as before. Run record: a check may have `each` (`count`, `failed`,
+  `item`, `items`, `values`: what each item's check got, the first and last 32
+  when there are more) and a failed item `index`; `Check.each` (`stepdoc.Each`)
+  and `Check.index` for other plugins.
 - Operand names word verify checks. A pytest-verifier check made with
   `actual_name=` reads with that name in place of the folded register read or the
   argument's source, and one made with `expected_name=` names its expected value:
