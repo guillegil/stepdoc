@@ -114,6 +114,33 @@ class Action:
 
 
 @dataclass
+class Each:
+    """One check made for every item of a collection, shown as one line (CHK-11).
+
+    pytest-verifier's ``all_satisfy`` makes one child check per item. When every
+    child reads the same (same name, same code), the check becomes one line,
+    ``'Index error': for each w in waveforms, w & INDEX_ERROR_BIT == 0``, and only
+    the failed children are kept, each with its ``index``.
+    """
+
+    count: int
+    """Items checked."""
+    failed: int
+    """Items whose check failed (they are the check's ``children``)."""
+    item: Optional[str] = None
+    """How the test names one item (the factory's parameter, ``w``), when known."""
+    items: Optional[str] = None
+    """How the test names the collection (``waveforms``), when known."""
+    values: list[Any] = field(default_factory=list)
+    """The value each item's check got, in item order; at most ``EACH_VALUES``
+    (the first and the last half) when there are more."""
+
+
+#: Most item values an ``Each`` keeps: the first and the last half of them.
+EACH_VALUES = 64
+
+
+@dataclass
 class Check:
     text: str
     passed: Optional[bool]
@@ -150,6 +177,11 @@ class Check:
     "dev.reg3.F", "symbolic": "dev.reg<channel>.F"}, "expected": {...}}``, each
     key only when given. ``symbolic`` is the name with its variable parts as
     ``<expr>`` (the same text when it has none)."""
+    each: Optional[Each] = None
+    """Set when this check stands for one check per item, folded into one line
+    (CHK-11): ``children`` then holds only the items that failed."""
+    index: Optional[int] = None
+    """For a child of a folded check: the item's position, from 0."""
     note_from_comment: bool = field(default=False, repr=False, compare=False)
     """Look up ``note`` from a source comment when the recorder resolves (asserts
     and adapters' checks set it; ``stepdoc_comment_notes = false`` turns it off)."""

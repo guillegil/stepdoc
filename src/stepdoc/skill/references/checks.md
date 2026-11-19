@@ -113,6 +113,20 @@ report      Verify tb.dev.map.block.reg3.F == wdata (243) -> got 240 ✗
 - HTML shows the checked expression, comparison and operand names in monospace;
   `name=` and notes stay prose.
 
+## One check per item: `verify.all_satisfy`
+
+```python
+verify.all_satisfy(waveforms, lambda w: verify.equal(w & INDEX_ERROR_BIT, 0), name="Index error clear")
+```
+
+- Procedure: `Verify 'Index error clear': for each w in waveforms, w & INDEX_ERROR_BIT == 0`
+  (one line, not one per item). Report: `-> 12 of 12 passed`, or `-> 2 of 12 failed`
+  followed by one `item [i]: ... -> got ...` line per failed item.
+- Pass the items as a named variable and use a lambda: its parameter and the
+  variable are the words of the line (`for each item, ...` without them).
+- Leave `name=` off the item's check: the line uses the `all_satisfy`'s name.
+- Items checked differently (other check type, name or expression) stay one line each.
+
 ## step(check=...)
 
 `step(title, check=value)` records a one-line step holding one check. It is not a

@@ -591,7 +591,12 @@ def test_children_keep_their_notes(tmp_path):
          "passed": True, "child_checks": [{"check_type": "equal", "name": "x", "description": "Verify 'x' == 1",
                                            "passed": True, "note": "first"}]}
     check = to_check(d, str(tmp_path))
-    assert check.children[0].note == "first" and check.note is None
+    # One check per item reads as one line (CHK-11), which takes the items' note.
+    assert check.children == [] and check.note == "first"
+    assert check.text == "'All': for each item, 'x' == 1"
+    other = {"check_type": "greater", "name": "y", "description": "Verify 'y' > 0", "passed": True, "note": "second"}
+    mixed = to_check({**d, "child_checks": [d["child_checks"][0], other]}, str(tmp_path))
+    assert [c.note for c in mixed.children] == ["first", "second"] and mixed.note is None
 
 
 # --------------------------------------------------------------------------- #
@@ -842,10 +847,15 @@ def test_children_are_worded_with_their_operand_names(tmp_path):
          "description": "Verify all items in 'All' satisfy condition (2 items)"}
     record = run_record([case_record(_recorded(to_check(d, str(tmp_path))))])
     jsonschema.validate(record, SCHEMA)
-    assert render(record, "procedure", "text").splitlines()[-2:] == ["      - Verify reg<ch>.F == <wdata>"] * 2
-    assert render(record, "report", "text").splitlines()[-2:] == [
-        "      - Verify reg0.F == wdata (243) -> got 240   ✗",
-        "      - Verify reg1.F == wdata (243) -> got 240   ✗",
+    # The items read the same in the procedure, so they are one line (CHK-11); the
+    # report lists the failed ones with this run's names.
+    assert render(record, "procedure", "text").splitlines()[-1] == (
+        "   - Verify 'All': for each item, reg<ch>.F == <wdata>"
+    )
+    assert render(record, "report", "text").splitlines()[-3:] == [
+        "   - Verify 'All': for each item, reg<ch>.F == <wdata> -> 2 of 2 failed   ✗",
+        "      - Verify item [0]: reg0.F == wdata (243) -> got 240   ✗",
+        "      - Verify item [1]: reg1.F == wdata (243) -> got 240   ✗",
     ]
 
 

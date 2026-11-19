@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Iterable, Optional, Union
 
-from .model import Action, Check, Location, Loop, Repeat, Step
+from .model import Action, Check, Each, Location, Loop, Repeat, Step
 from .recorder import Recorder
 
 SCHEMA_ID = "urn:stepdoc:schema:run-record:0.4"  # no published URL yet
@@ -120,6 +120,18 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         **({} if c.note is None else {"note": c.note}),
         **({} if c.label is None else {"label": c.label}),
         **({} if c.operands is None else {"operands": c.operands}),
+        **({} if c.each is None else {"each": _each(c.each)}),
+        **({} if c.index is None else {"index": c.index}),
+    }
+
+
+def _each(e: Each) -> dict[str, Any]:
+    return {
+        "count": e.count,
+        "failed": e.failed,
+        "item": e.item,
+        "items": e.items,
+        "values": [to_jsonable(v) for v in e.values],
     }
 
 
