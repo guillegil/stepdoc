@@ -123,6 +123,12 @@
   `stepdoc_collapse_repeats = false` keeps every write.
 - Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
 
+### Fixed
+- A test run again inside one protocol (pytest-rerunfailures, pytest-reporter's
+  retries) gets its pytest-verifier checks in its own steps. They used to go into
+  the steps of the first run, leaving the rerun's steps without checks, so a rerun
+  that failed a check showed only passed steps.
+
 ## 0.2.0
 
 First release on PyPI.

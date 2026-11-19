@@ -178,6 +178,44 @@ def test_verify_checks_go_into_their_steps(verify_project):
     assert "1. Create user   ✓" in report
 
 
+# Runs each test twice inside one protocol, as pytest-rerunfailures and
+# pytest-reporter's retries do: one stepdoc recorder sees both runs.
+RERUN = '''
+import pytest
+from _pytest.runner import runtestprotocol
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
+    runtestprotocol(item, nextitem=nextitem, log=False)
+    for report in runtestprotocol(item, nextitem=nextitem, log=False):
+        item.ihook.pytest_runtest_logreport(report=report)
+    item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
+    return True
+'''
+
+
+def test_verify_checks_of_a_rerun_go_into_its_own_steps(verify_project):
+    verify_project.makeconftest(RERUN)
+    verify_project.makepyfile(
+        test_rerun='''
+from stepdoc import step
+
+
+def test_twice(verify):
+    with step("Measure"):
+        verify.equal(1, 1, name="One")
+'''
+    )
+    run(verify_project, "test_rerun.py", "--stepdoc-record=run.json").assert_outcomes(passed=1)
+    (test,) = json.loads((verify_project.path / "run.json").read_text())["tests"]
+    first, second = test["steps"]
+    assert [e["text"] for e in first["entries"]] == ["'One' == 1"]
+    assert [e["text"] for e in second["entries"]] == ["'One' == 1"]
+    assert first["status"] == second["status"] == "passed"
+
+
 def test_without_the_adapter_steps_are_unknown(verify_project):
     verify_project.makeini("[pytest]\nstepdoc_adapters = -verify\n")
     run(verify_project, "--stepdoc-record=run.json")
