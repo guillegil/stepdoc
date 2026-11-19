@@ -456,7 +456,8 @@ class _Placer:
         self.rec = rec
         self.root = root
         self.paths: list[tuple[Step, ...]] = []
-        self._walk(rec.steps, ())
+        # Only the steps of this run of the test: a rerun's checks are its own
+        self._walk(rec.steps[rec.attempt_start :], ())
         self.at: dict[int, int] = {id(p[-1]): i for i, p in enumerate(self.paths)}
         self.spans: dict[int, Optional[tuple[str, int, int]]] = {}
         self.cursor = -1

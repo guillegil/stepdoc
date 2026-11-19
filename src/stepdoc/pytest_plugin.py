@@ -181,6 +181,9 @@ def _in_section(item: pytest.Item, section: Section) -> None:
 # STEP-8: steps run by fixtures go into the Setup and Teardown sections.
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
+    rec = item.stash.get(_recorder_key, None)
+    if rec is not None:
+        rec.attempt_start = len(rec.steps)  # a rerun starts here
     _in_section(item, "setup")
     try:
         return (yield)

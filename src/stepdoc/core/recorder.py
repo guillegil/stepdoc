@@ -70,6 +70,11 @@ class Recorder:
         self.started_at = time.time()
         self.ended: Optional[float] = None
         self.steps: list[Step] = []
+        self.attempt_start = 0
+        """Index in :attr:`steps` of the first step of the current run of the test.
+        A rerun (pytest-rerunfailures, pytest-reporter's retries) runs the test
+        again inside one recorder; the pytest plugin moves this to the end at each
+        setup, so checks that arrive after a phase go into that run's own steps."""
         self.unscoped: list[Union[Action, Check, Repeat]] = []  # ACT-3
         self._stack: list[Step] = []
         self._tokens: list[Any] = []
