@@ -16,6 +16,8 @@ Then read it as a reviewer would, and fix the test, not the document.
 | Actions under "Unscoped" | actions outside any `with step(...)` | wrap them in a step, or move them into a fixture |
 | Dozens of identical reads | reads from different lines | read in one loop line, or use `@step(..., record=False)` |
 | A loop shows every pass | the body does more than 8 actions, or a step/failed check in each pass | shorten the body with a `record=False` helper; check once after the loop |
+| One "Verify" line per pass of a loop | a `verify.*` check in each pass: pytest-verifier's checks are placed after the phase and are not collapsed, in a plain loop or in `stepdoc.repeat` | check once after the loop, or collect the values and check them with `verify.all_satisfy` (one line); a plain `assert` in the loop collapses with it |
+| `0xF3` in the procedure, `0x00F3` in the report | the check's format comes from the run (a value's `__verify_format__`, a `width=` variable) | intended: the procedure shows the literal as written; write it the way it should read, or give literal `radix=` and `width=` |
 | `Repeat` with no words | a loop collapsed on its own | wrap it in `with stepdoc.repeat("…", until="…"):` |
 | A step with no lines | the step's actions were not recorded | check the bridge is attached in the fixture the test uses |
 | No "Verify" lines for passing asserts | `enable_assertion_pass_hook` is off | set it in the pytest ini and clear `.pyc` caches |

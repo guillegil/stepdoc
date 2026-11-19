@@ -478,6 +478,7 @@ def _take_values(kept: Any, new: Any) -> None:
     """A collapsed entry shows the values of the latest event."""
     if isinstance(kept, Check):
         kept.actual, kept.expected, kept.detail = new.actual, new.expected, new.detail
+        kept.actual_text, kept.difference = new.actual_text, new.difference
         for a, b in zip(kept.reads, new.reads):
             _take_values(a, b)
         return
@@ -512,6 +513,7 @@ def _continue(rep: Repeat, new: Union[Action, Check]) -> bool:
                 if isinstance(kept, Check):  # its reads are separate items of the pass
                     kept.actual, kept.expected = new_value.actual, new_value.expected
                     kept.detail = new_value.detail
+                    kept.actual_text, kept.difference = new_value.actual_text, new_value.difference
                 else:
                     _take_values(kept, new_value)
             rep.count = (rep.count or 0) + 1

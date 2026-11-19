@@ -3,6 +3,36 @@
 ## Unreleased
 
 ### Added
+- Register checks read in hex and say which bits differ. A pytest-verifier 0.11
+  check that shows its values in a format (`radix=`, `width=`, `verify.bits`, a
+  value with `__verify_format__`) now shows the value it got the same way in
+  the report, and a failed one adds the bits and fields that differ: `Verify
+  dev.CTRL & 0x00FF == 0x00F3 -> got 0x12F0, bits [1:0] differ: MODE [3:1] is
+  0b000, expected 0b001 ✗` (it was `-> got 4848`). The procedure shows neither,
+  so cases with different values still share one procedure.
+- `verify.bits` is worded like the comparisons: it starts with the checked value
+  (the register a read on its line produced, else the argument's source), takes
+  `name=`, `actual_name=` and `expected_name=`, and in the procedure an expected
+  value or a mask given by name reads `<wdata>`, `<MASK>` (`Verify dev.CTRL &
+  <MASK> == <wdata>`). A literal expected value beside a mask given by name is
+  shown whole there (`& <MASK> == 0xABF3`), not under the mask. A checked value
+  that binds more loosely than `&` is in parentheses: `(dev.CTRL.value | 1) &
+  <MASK> == <wdata>`.
+- A format that depends on the run does not reach the procedure. A literal in a
+  check with a format reads as pytest-verifier writes it (`== 0x00F3`) only when
+  the call fixes the format (literal `radix=`/`width=`, and no width or radix in
+  the record that the call does not give). With a `width=` that is a variable,
+  or a format the checked value gives (`__verify_format__`:
+  `verify.equal(reg.read(), 0)` on 8, 16 and 32 bit registers), the procedure
+  shows the literal as the test wrote it (`reg.read() == 0`), and a mask or
+  expected value passed through `**kwargs` as `<mask>`, `<expected>`, so the
+  cases stay one procedure.
+- `Check.actual_text` (the producer's text of the value a check got) and
+  `Check.difference` (a short clause the report adds to a failed check's
+  result), for any adapter or `stepdoc.Check(...)`; `Each.texts`, the texts of
+  an `all_satisfy`'s item values. Run record (schema 0.4): a check may have
+  `actual_text` and `difference`, and `each` may have `texts`. Records without
+  them render as before.
 - `verify.all_satisfy` reads as one line (CHK-11). pytest-verifier makes one
   check per item, which used to be one line per item (twelve times `Verify
   'Index error': w & INDEX_ERROR_BIT == 0`). When every item's check reads the
@@ -123,6 +153,10 @@
   with 0.1 to 0.3 still render.
 
 ### Changed
+- The agent skill covers register checks, how the other pytest-verifier checks
+  read, the three less used ini settings, the pytest-strategies adapter,
+  pytest-xdist, the hooks and `stepdoc skill install`; its dry-run page says
+  that pytest-verifier still judges.
 - A pytest-verifier check with a name and a non-literal checked value now reads
   `'Stored age': user["age"] == <age>` instead of `'Stored age' == <age>`.
 - Placing pytest-verifier's checks after a phase no longer grows with the square
@@ -137,6 +171,10 @@
   report `(16 times, 2 ms)`. Writes used to stay one line each.
   `stepdoc_collapse_repeats = false` keeps every write.
 - Python 3.9 and 3.10 are supported (was 3.11+). CI tests 3.9 to 3.14.
+
+### Fixed
+- The suite and `mypy` pass where pytest-strategies is installed (the fake
+  plugin of one test met the real entry point; one `type: ignore` was unused).
 
 ## 0.2.0
 

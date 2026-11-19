@@ -122,6 +122,8 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         **({} if c.operands is None else {"operands": c.operands}),
         **({} if c.each is None else {"each": _each(c.each)}),
         **({} if c.index is None else {"index": c.index}),
+        **({} if c.actual_text is None else {"actual_text": c.actual_text}),
+        **({} if c.difference is None else {"difference": c.difference}),
     }
 
 
@@ -132,6 +134,7 @@ def _each(e: Each) -> dict[str, Any]:
         "item": e.item,
         "items": e.items,
         "values": [to_jsonable(v) for v in e.values],
+        **({} if e.texts is None else {"texts": list(e.texts)}),
     }
 
 

@@ -72,7 +72,7 @@ class StrategiesAdapter(Adapter):
 def _read_export() -> dict[tuple[str, str], Mapping[str, Any]]:
     """``(strategy name, file)`` -> the strategy's ``Parameter.to_dict()``."""
     try:
-        from pytest_strategy import export_strategies  # type: ignore[import-not-found]
+        from pytest_strategy import export_strategies  # type: ignore[import-not-found, unused-ignore]
 
         doc = json.loads(export_strategies())
     except Exception:
