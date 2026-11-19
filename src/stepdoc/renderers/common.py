@@ -34,6 +34,10 @@ class Line:
     """A step's or repeat's ``note=``, shown under its line in both documents."""
     aside: Optional[str] = None
     """A check's note, prose shown after ``code`` in parentheses (CHK-9)."""
+    label: Optional[str] = None
+    """A check's name with its quotes (``'FIFO not full':``), words shown between
+    ``verb`` and ``code`` (CHK-10)."""
+    is_check: bool = False
 
 
 def show(value: Any) -> str:
@@ -160,10 +164,25 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
                     f"{r['target']['concrete']} = {show(r['value']['concrete'])}" for r in reads
                 )
     code = (c.get("symbolic_text") or c["text"]) if symbolic else c["text"]
+    label, code = _split_label(c.get("label"), code)
     if c.get("selected"):
         code += f" [→ {c['selected']}]"
     note = c.get("note") or None
-    return Line(c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note)
+    return Line(
+        c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note, label=label,
+        is_check=True,
+    )
+
+
+def _split_label(label: Any, text: str) -> tuple[Optional[str], str]:
+    """A check's text as its name in quotes and the code after it: ``'Idle':`` and
+    ``dev.ctl.tx == 0``, or ``'HTTP status'`` and ``== 201``. Joined by a space
+    they are the text again."""
+    if isinstance(label, str) and label:
+        for head in (f"'{label}':", f"'{label}'"):
+            if text.startswith(head + " ") and len(text) > len(head) + 1:
+                return head, text[len(head) + 1:]
+    return None, text
 
 
 def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[Line]:
@@ -236,7 +255,7 @@ def test_lines(test: Record, symbolic: bool, sections: tuple[str, ...] = SECTION
 def plain(line: Line) -> str:
     """A line as plain text, without status marks or notes."""
     head = f"{line.number}. " if line.number else ("- " if not line.is_step else "")
-    body = " ".join(p for p in (line.verb, line.code) if p)
+    body = " ".join(p for p in (line.verb, line.label, line.code) if p)
     if line.aside:
         body += f" ({' '.join(line.aside.split())})"
     if line.result:

@@ -29,6 +29,17 @@ def pytest_verify_results(item, when, checks, passed):
 
 # A fake pytest-verifier: the ``verify`` fixture records descriptors shaped like
 # the real ones and passes them to the hook when the test body ends.
+# Registers the fake under pytest-verifier's plugin name. ``-p pytest_verifier``
+# would load the real plugin's entry point where pytest-verifier is installed;
+# with the name taken, pytest leaves that entry point alone.
+FAKE_LOADER = '''
+import fake_verifier
+
+
+def pytest_addhooks(pluginmanager):
+    pluginmanager.register(fake_verifier, "pytest_verifier")
+'''
+
 FAKE_VERIFY = '''
 import os
 import sys
@@ -129,12 +140,15 @@ def test_plain():
 
 @pytest.fixture
 def verify_project(pytester):
-    pytester.makepyfile(pytest_verifier=FAKE_VERIFY, verify_specs=VERIFY_SPECS, test_users=VERIFY_TESTS)
+    pytester.makepyfile(
+        load_fake_verifier=FAKE_LOADER, fake_verifier=FAKE_VERIFY, verify_specs=VERIFY_SPECS,
+        test_users=VERIFY_TESTS,
+    )
     return pytester
 
 
 def run(pytester, *args):
-    return pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "pytest_verifier", *args)
+    return pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "load_fake_verifier", *args)
 
 
 def test_verify_checks_go_into_their_steps(verify_project):

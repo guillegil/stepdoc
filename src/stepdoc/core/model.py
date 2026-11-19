@@ -140,6 +140,16 @@ class Check:
     note: Optional[str] = None
     """Words for the reader, shown after the check's text in parentheses: the
     producer's ``note=``, else a source comment at ``location`` (CHK-9)."""
+    label: Optional[str] = None
+    """The name given to the check, when ``text`` (and ``symbolic_text``) start
+    with it in quotes (``'FIFO not full': dev.ctl.tx == 0``, ``'HTTP status' ==
+    201``): what follows it is code, the name is words (CHK-10)."""
+    operands: Optional[dict[str, dict[str, str]]] = None
+    """Names the test gave the compared values (pytest-verifier's ``actual_name=``
+    and ``expected_name=``), which word the check: ``{"actual": {"concrete":
+    "dev.reg3.F", "symbolic": "dev.reg<channel>.F"}, "expected": {...}}``, each
+    key only when given. ``symbolic`` is the name with its variable parts as
+    ``<expr>`` (the same text when it has none)."""
     note_from_comment: bool = field(default=False, repr=False, compare=False)
     """Look up ``note`` from a source comment when the recorder resolves (asserts
     and adapters' checks set it; ``stepdoc_comment_notes = false`` turns it off)."""

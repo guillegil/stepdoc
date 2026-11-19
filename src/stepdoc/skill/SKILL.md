@@ -96,6 +96,10 @@ database, CLI and device recipes and every `record_action` argument.
 - A comment directly above a check (or at the end of its line) is its note:
   `Verify dat.txfe == 1 (CMD FIFO empty)`. Write it for the reader; `note=` on a
   verify check wins. `stepdoc_comment_notes = false` turns comment notes off.
+- pytest-verifier's `actual_name=` and `expected_name=` word a verify check in
+  place of its source: `verify.equal(f, wdata, actual_name=f"blk.reg{ch}.F",
+  expected_name="wdata")` reads `Verify blk.reg<ch>.F == <wdata>` in the procedure
+  and `blk.reg3.F == wdata (243)` in the report (references/checks.md).
 - stepdoc never compares values itself.
 
 Details: [references/checks.md](references/checks.md).

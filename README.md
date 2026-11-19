@@ -271,6 +271,39 @@ the plugin already publishes:
   `Verify 'FIFO not full': dev.block.esmi<channel>_ctl.tx == 0`. A literal
   checked value keeps the old form (`Verify 'HTTP status' == 201`). The
   check's `note=` is shown after it in parentheses.
+
+  Operand names win over that wording. When the code does not say what a value
+  is, pytest-verifier's `actual_name=` and `expected_name=` do, and stepdoc words
+  the check with them:
+
+  ```python
+  block_reg_f = getattr(tb.dev.map.block, f"reg{channel}").F
+  verify.equal(block_reg_f, wdata,
+               actual_name=f"tb.dev.map.block.reg{channel}.F", expected_name="wdata")
+  ```
+
+  ```text
+  procedure   Verify tb.dev.map.block.reg<channel>.F == <wdata>
+  report      Verify tb.dev.map.block.reg3.F == wdata (243) -> got 240 ✗
+  ```
+
+  The procedure shows only the generic form of a name (each `{...}` of the
+  f-string or template string as `<...>`; a name without one as it is written)
+  and no value of the run: an expected name reads `<wdata>`, like any expected
+  value given by name. The report shows the names as this run spelled them, the
+  expected value once, after its name. With `name=` as well, the name comes
+  first: `Verify 'Stored word': tb.dev.map.block.reg<channel>.F == <wdata>`.
+  `actual_name=` works on every check of one value, `expected_name=` on the
+  comparisons and `length`. A read made on the check's line still goes into the
+  check; line breaks and control characters in a name read as a space. In the
+  run record such a check has `operands` (each name, `concrete`
+  and `symbolic`), and a check that starts with its `name=` has `label`; steps
+  handed to other plugins carry both as `Check.operands` and `Check.label`.
+
+  In the HTML documents the code of a verify line (the checked expression, the
+  comparison, operand names) is monospace, `<code class="expr">`, in the
+  system's own monospace font; a name given with `name=` and the note stay in
+  the text font. Markdown puts the same code between backticks.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.

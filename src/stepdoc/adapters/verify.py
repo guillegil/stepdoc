@@ -5,7 +5,10 @@ end of each test phase, to its ``pytest_verify_results`` hook as JSON-safe
 descriptors. This adapter places each one in the step it was made in, using the
 descriptor's ``location`` (and ``called_from`` for checks made in helpers), and
 renders expected values given by name symbolically in the procedure
-(``'Stored age' == <age>``).
+(``'Stored age' == <age>``). Operand names given to a check (``actual_name=``,
+``expected_name=``) word it in place of what the source says: their generic form
+in the procedure (``tb.dev.map.block.reg<channel>.F == <wdata>``), this run's in
+the report (``tb.dev.map.block.reg3.F == wdata (243)``).
 
 Without this adapter, stepdoc cannot see verify's checks, so no step of a test
 that uses verify is shown as passed (NFR-7).
@@ -126,8 +129,19 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         if 0 <= index < len(branches):
             selected = branches[index].get("label")
     rest = _rest(description, d.get("name"))
-    hint = _hint(d)
-    sym_rest = _symbolic_rest(d, rest, location, hint) if rest is not None else None
+    actual = _operand(d, "actual_name") if rest is not None else None
+    expected = _named_expected(d, rest) if rest is not None else None
+    # With an operand name the automatic name is that name, not the source text:
+    # calls sharing a line are then told apart by their ``actual_name=``.
+    hint = _hint(d) if actual is None else None
+    spelled = None if actual is None else actual["concrete"]
+    sym_rest = None
+    if rest is not None:
+        if expected is not None:
+            sym_rest = expected[1]
+        else:
+            sym_rest = _symbolic_rest(d, rest, location, hint, spelled)
+    operands = {k: v for k, v in (("actual", actual), ("expected", expected and expected[0])) if v}
     check = Check(
         text=text,
         passed=passed if isinstance(passed, bool) else None,
@@ -140,16 +154,106 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         source=d,
         symbolic_text=None if sym_rest is None else f"'{d.get('name')}' {sym_rest}",
         note=_note(d),
+        operands=operands or None,
     )
     wording = None
     kind = str(d.get("check_type"))
+    prefix = "" if d.get("auto_name") is True else f"'{d.get('name')}': "
+    named = None if actual is None else (actual["symbolic"], actual["concrete"])
     if rest is not None and location is not None and kind in _SUBJECTS:
-        subject = _subject(location.file, location.line, _METHODS.get(kind, kind), hint)
+        subject = _subject(location.file, location.line, _METHODS.get(kind, kind), hint, spelled)
         if subject is not None:
-            prefix = "" if d.get("auto_name") is True else f"'{d.get('name')}': "
-            wording = _Wording(prefix, rest, sym_rest, subject)
+            wording = _Wording(prefix, rest, sym_rest, subject, named)
             wording.apply(check, subject.symbolic, subject.concrete)
+    if wording is None and named is not None and rest is not None:
+        _word(check, prefix, named[0], named[1], rest, sym_rest)
+    name = d.get("name")
+    if isinstance(name, str) and name and d.get("auto_name") is not True:
+        if check.text.startswith((f"'{name}': ", f"'{name}' ")):
+            check.label = name
     return check, wording
+
+
+# Check types that take ``expected_name=``: all of them are in _COMPARISONS.
+_NAMED_EXPECTED = frozenset(
+    {"equal", "not_equal", "approx", "greater", "greater_equal", "less", "less_equal", "length"}
+)
+# ``<channel>``, ``<i + 1>``: a variable part written in a name, not a comparison
+# (``a < b > c``).
+_PLACEHOLDER = re.compile(r"<[^<>\s](?:[^<>]*[^<>\s])?>")
+# Control characters, line and paragraph separators and lone surrogates: a name
+# is one line of text that every document can hold.
+_UNSAFE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029\ud800-\udfff]+")
+
+
+def _line(text: Any) -> Optional[str]:
+    """``text`` as one line (control characters and line breaks as a space),
+    stripped; None when it is not text or is blank."""
+    if not isinstance(text, str):
+        return None
+    return _UNSAFE.sub(" ", text).strip() or None
+
+
+def _operand(d: Mapping[str, Any], key: str) -> Optional[dict[str, str]]:
+    """An operand name of a check (pytest-verifier's ``actual_name=`` or
+    ``expected_name=``) as ``{"concrete": ..., "symbolic": ...}``: the text with
+    this run's values and its generic form (each interpolation as ``<expr>``; the
+    same text when the name has none or pytest-verifier does not know them), each
+    as one line. None when the record has no such name."""
+    name = _line(d.get(key))
+    if name is None:
+        return None
+    return {"concrete": name, "symbolic": _line(d.get(f"{key}_symbolic")) or name}
+
+
+def _named_expected(d: Mapping[str, Any], rest: str) -> Optional[tuple[dict[str, str], str]]:
+    """The expected value's operand name and the text after the checked value for
+    the procedure: the generic name alone, no value of this run (``== <wdata>``;
+    a name with ``<parts>`` of its own as it is, ``== limits[<channel>]``).
+
+    pytest-verifier's description has the name before the value (``== wdata
+    (243)``, ``== nominal (3.3V) ± 0.05V``); the procedure's text is built from
+    the record's name, so it holds no run value even when the description shows
+    the name another way (shortened, escaped). None when the check has no such
+    name, or is an ``approx`` whose tolerance cannot be told from the description:
+    the check is then worded as without the name."""
+    kind = str(d.get("check_type"))
+    name = _operand(d, "expected_name") if kind in _NAMED_EXPECTED else None
+    if name is None:
+        return None
+    op = _COMPARISONS[kind][0]
+    tolerance = "" if kind != "approx" else _tolerance(d, rest, f"{op} {name['concrete']} (")
+    if tolerance is None:
+        return None
+    generic = name["symbolic"]
+    # Variable parts pytest-verifier found, or ``<parts>`` written in the name.
+    parts = generic != name["concrete"] or _PLACEHOLDER.search(generic) is not None
+    shown = generic if parts else f"<{generic}>"
+    units = f" {d['units']}" if d.get("units") else ""
+    return name, f"{op} {shown}{units}{tolerance}"
+
+
+def _tolerance(d: Mapping[str, Any], rest: str, head: str) -> Optional[str]:
+    """The tolerances of an ``approx`` with a named expected value (`` ± 0.05V``,
+    `` ± 0.5V (abs) ± 1% (rel)``): what follows the value in parentheses after
+    the name; when the description shows the name another way, its last parts,
+    one per tolerance of the record. None when neither is there."""
+    if rest.startswith(head):
+        end = rest.find(") ±", len(head))  # the value is a number: the first one closes it
+        if end >= 0:
+            return rest[end + 1:]
+    count = sum(d.get(k) is not None for k in ("abs_tol", "rel_tol"))
+    parts = rest.rsplit(" ± ", count) if count else []
+    return "".join(f" ± {p}" for p in parts[1:]) if len(parts) == count + 1 else None
+
+
+def _word(
+    check: Check, prefix: str, symbolic: str, concrete: str, rest: str, sym_rest: Optional[str]
+) -> None:
+    """``[prefix]<checked value> <rest>``: the report's text and the procedure's."""
+    check.text = f"{prefix}{concrete} {rest}"
+    sym = f"{prefix}{symbolic} {sym_rest or rest}"
+    check.symbolic_text = None if sym == check.text else sym
 
 
 def _rest(description: str, name: Any) -> Optional[str]:
@@ -199,17 +303,44 @@ def _first(call: ast.Call) -> Optional[ast.expr]:
 
 
 @lru_cache(maxsize=4096)
-def _call(path: str, line: int, method: str, hint: Optional[str]) -> Optional[ast.Call]:
+def _call(
+    path: str, line: int, method: str, hint: Optional[str], spelled: Optional[str] = None
+) -> Optional[ast.Call]:
     """The ``.method(...)`` call that made a check at ``path:line``. With several
-    on the line, the one whose checked value reads ``hint``; None when that does
-    not tell them apart (the check then keeps its plain text)."""
+    on the line, the one whose checked value reads ``hint``, or whose
+    ``actual_name=`` spells ``spelled``; None when that does not tell them apart
+    (the check then keeps its plain text)."""
     calls = calls_at(path, line, method)
     if len(calls) == 1:
         return calls[0]
-    if hint is None:
+    if hint is not None:
+        matches = [c for c in calls if _reads_as(path, _first(c), hint)]
+    elif spelled is not None:
+        matches = [c for c in calls if _spells(c, spelled)]
+    else:
         return None
-    matches = [c for c in calls if _reads_as(path, _first(c), hint)]
     return matches[0] if len(matches) == 1 else None
+
+
+def _spells(call: ast.Call, name: str) -> bool:
+    """Whether the call's ``actual_name=`` can have given ``name``: a string that
+    is it, or an f-string (a t-string) whose literal parts are in it in order,
+    the first at its start and the last at its end."""
+    node = next((kw.value for kw in call.keywords if kw.arg == "actual_name"), None)
+    if isinstance(node, ast.Constant):
+        return _line(node.value) == name
+    if type(node).__name__ not in ("JoinedStr", "TemplateStr"):  # TemplateStr: Python 3.14+
+        return False
+    literal = [
+        _UNSAFE.sub(" ", v.value) if isinstance(v, ast.Constant) and isinstance(v.value, str) else None
+        for v in getattr(node, "values", ())
+    ]
+    if literal and literal[0] is not None:
+        literal[0] = literal[0].lstrip()
+    if literal and literal[-1] is not None:
+        literal[-1] = literal[-1].rstrip()
+    pattern = "".join(".*" if text is None else re.escape(text) for text in literal)
+    return re.fullmatch(pattern, name, re.DOTALL) is not None
 
 
 def _reads_as(path: str, node: Optional[ast.expr], hint: str) -> bool:
@@ -222,12 +353,14 @@ def _reads_as(path: str, node: Optional[ast.expr], hint: str) -> bool:
 
 
 @lru_cache(maxsize=4096)
-def _subject(path: str, line: int, method: str, hint: Optional[str] = None) -> Optional[_Subject]:
+def _subject(
+    path: str, line: int, method: str, hint: Optional[str] = None, spelled: Optional[str] = None
+) -> Optional[_Subject]:
     """The first argument of the ``.method(...)`` call at ``path:line``; None when
     it is a literal, the call is ambiguous or the source is not available. Never
     raises."""
     try:
-        call = _call(path, line, method, hint)
+        call = _call(path, line, method, hint, spelled)
         node = _first(call) if call is not None else None
         if call is None or node is None or isinstance(node, ast.Starred) or symbolic(path, node) is None:
             return None
@@ -252,15 +385,22 @@ class _Wording:
     rest: str
     sym_rest: Optional[str]
     subject: _Subject
+    named: Optional[tuple[str, str]] = None
+    """The checked value's operand name (symbolic, concrete), from the check's
+    ``actual_name=``: it words the check whatever the source or a read says."""
 
     def apply(self, check: Check, symbolic: str, concrete: str) -> None:
-        check.text = f"{self.prefix}{concrete} {self.rest}"
-        sym = f"{self.prefix}{symbolic} {self.sym_rest or self.rest}"
-        check.symbolic_text = None if sym == check.text else sym
+        if self.named is not None:
+            symbolic, concrete = self.named
+        _word(check, self.prefix, symbolic, concrete, self.rest, self.sym_rest)
 
 
 def _symbolic_rest(
-    d: Mapping[str, Any], rest: str, loc: Optional[Location], hint: Optional[str] = None
+    d: Mapping[str, Any],
+    rest: str,
+    loc: Optional[Location],
+    hint: Optional[str] = None,
+    spelled: Optional[str] = None,
 ) -> Optional[str]:
     """The text after the name for the procedure when the expected value is a name
     or an expression (``== <age>``); None when it is a literal (``rest`` already
@@ -268,7 +408,7 @@ def _symbolic_rest(
     kind = str(d.get("check_type"))
     if loc is None or (kind != "between" and kind not in _COMPARISONS):
         return None
-    syms = _expected(loc.file, loc.line, kind, hint)
+    syms = _expected(loc.file, loc.line, kind, hint, spelled)
     if syms is None:
         return None
     units = f" {d['units']}" if d.get("units") else ""
@@ -287,11 +427,11 @@ def _symbolic_rest(
 
 @lru_cache(maxsize=4096)
 def _expected(
-    path: str, line: int, kind: str, hint: Optional[str] = None
+    path: str, line: int, kind: str, hint: Optional[str] = None, spelled: Optional[str] = None
 ) -> Optional[tuple[Optional[str], ...]]:
     """The expected value's ``<source>`` at a call site (``(low, high)`` for
     ``between``), once per line; None when every one is a literal."""
-    call = _call(path, line, _METHODS.get(kind, kind), hint)
+    call = _call(path, line, _METHODS.get(kind, kind), hint, spelled)
     if call is None:
         return None
     if kind == "between":

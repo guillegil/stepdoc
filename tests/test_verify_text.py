@@ -4,7 +4,9 @@ A check's text starts with the checked value: the register a read on the same
 line produced (``dev.block.esmi<channel>_32dat.txfe == 1``), else the argument's
 source; a ``note=`` or a source comment is shown after it in parentheses.
 pytest-verifier is not installed here: a fake publishes descriptors shaped like
-its own, with ``auto_name`` and ``note``."""
+its own, with ``auto_name``, ``note`` and the operand names (``actual_name``,
+``expected_name`` and their ``_symbolic`` forms). tests/test_verify_operands.py
+runs the real plugin when it is installed."""
 
 import json
 import re
@@ -19,12 +21,14 @@ from stepdoc.adapters.verify import to_check
 from stepdoc.core.comments import clear_caches, comment_note
 from stepdoc.core.record import case_record, run_record
 from stepdoc.renderers import render
-from tests.test_adapters import SCHEMA, VERIFY_SPECS
+from tests.test_adapters import FAKE_LOADER, SCHEMA, VERIFY_SPECS
 
 pytest_plugins = ["pytester"]
 
 # A fake pytest-verifier whose name= is optional: without one, the name is the
-# source of the first argument and the descriptor says ``auto_name``.
+# source of the first argument and the descriptor says ``auto_name``. Operand
+# names are stored as pytest-verifier 0.11 stores them; the symbolic form comes
+# from an f-string written on the call's line.
 FAKE_VERIFY = '''
 import linecache
 import os
@@ -48,22 +52,35 @@ class Verify:
         self.records = []
         self.calls = {}
 
-    def equal(self, actual, expected, *, name=None, note=None):
-        return self._add("equal", name, "== " + repr(expected), actual == expected, note,
-                         actual=actual, expected=expected)
+    def equal(self, actual, expected, *, name=None, note=None, actual_name=None, expected_name=None):
+        shown = repr(expected) if expected_name is None else f"{expected_name} ({expected!r})"
+        return self._add("equal", name, "== " + shown, actual == expected, note,
+                         actual_name, expected_name, actual=actual, expected=expected)
 
-    def between(self, actual, low, high, *, name=None, note=None):
+    def between(self, actual, low, high, *, name=None, note=None, actual_name=None):
         return self._add("between", name, f"∈ [{low!r}, {high!r}]", low <= actual <= high, note,
-                         actual=actual, low=low, high=high)
+                         actual_name, actual=actual, low=low, high=high)
 
-    def is_true(self, actual, *, name=None, note=None):
-        return self._add("true", name, "is True", bool(actual), note, actual=actual)
+    def is_true(self, actual, *, name=None, note=None, actual_name=None):
+        return self._add("true", name, "is True", bool(actual), note, actual_name, actual=actual)
 
-    def _add(self, kind, name, rest, passed, note, **fields):
+    def _add(self, kind, name, rest, passed, note, actual_name=None, expected_name=None, **fields):
         frame = sys._getframe(2)
         root = str(self.item.config.rootpath)
         d = {"check_type": kind, "phase": "call", "passed": passed,
              "location": f"{os.path.relpath(frame.f_code.co_filename, root)}:{frame.f_lineno}", **fields}
+        source = linecache.getline(frame.f_code.co_filename, frame.f_lineno)
+        for key, text in (("actual_name", actual_name), ("expected_name", expected_name)):
+            if text is None:
+                continue
+            d[key] = text
+            written = re.search(key + r'=f"([^"]*)"', source)
+            symbolic = re.sub(r"\\{([^{}]+)\\}", r"<\\1>", written.group(1)) if written else text
+            if symbolic != text:
+                d[key + "_symbolic"] = symbolic
+        if name is None and actual_name is not None:
+            name = actual_name
+            d["auto_name"] = True
         caller = frame
         while caller is not None and not caller.f_code.co_name.startswith("test_"):
             caller = caller.f_back
@@ -175,7 +192,10 @@ def test_fifo(verify, tb, channel):
 
 @pytest.fixture
 def project(pytester):
-    pytester.makepyfile(pytest_verifier=FAKE_VERIFY, verify_specs=VERIFY_SPECS, fakedev=FAKE_DEVICE)
+    pytester.makepyfile(
+        load_fake_verifier=FAKE_LOADER, fake_verifier=FAKE_VERIFY, verify_specs=VERIFY_SPECS,
+        fakedev=FAKE_DEVICE,
+    )
     pytester.makeconftest(CONFTEST)
     pytester.makeini("[pytest]\nstepdoc_skip_modules = fakedev\nenable_assertion_pass_hook = true\n")
     return pytester
@@ -183,7 +203,7 @@ def project(pytester):
 
 def run(pytester, *args):
     out = ("--stepdoc-record=run.json", "--stepdoc-procedure=procedure.txt", "--stepdoc-report=report.txt")
-    return pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "pytest_verifier", *out, *args)
+    return pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "load_fake_verifier", *out, *args)
 
 
 def lines(pytester, name):
@@ -231,7 +251,7 @@ def test_markdown_and_html_show_the_note_as_prose(project):
         '''
     )
     project.runpytest_subprocess(
-        "-p", "no:cacheprovider", "-p", "pytest_verifier",
+        "-p", "no:cacheprovider", "-p", "load_fake_verifier",
         "--stepdoc-procedure=p.md", "--stepdoc-report=r.html",
     ).assert_outcomes(passed=1)
     md = (project.path / "p.md").read_text()
@@ -399,6 +419,39 @@ def test_two_checks_on_one_line(project):
     ]
 
 
+def test_two_checks_on_one_line_are_told_apart_by_their_operand_names(project):
+    project.makepyfile(
+        test_it='''
+        from stepdoc import step
+
+
+        def test_it(verify, tb):
+            w = 0
+            with step("Two names"):
+                verify.equal(tb.dev.block.esmi1_ctl.tx, w, actual_name="R1"); verify.equal(tb.dev.block.esmi2_ctl.tx, w, actual_name="R2", name="Second")
+            with step("One name twice"):
+                verify.equal(tb.dev.block.esmi1_ctl.tx, w, actual_name="R"); verify.equal(tb.dev.block.esmi2_ctl.tx, w, actual_name="R")
+        '''
+    )
+    run(project).assert_outcomes(passed=1)
+    assert numbered(lines(project, "procedure.txt")) == [
+        "1. Two names",
+        "   1.1. Verify R1 == <w>",
+        "   1.2. Verify 'Second': R2 == <w>",
+        "2. One name twice",
+        # Either call may have made each check: plain text, reads on their own lines.
+        "   2.1. Read dev.block.esmi1_ctl.tx",
+        "   2.2. Read dev.block.esmi2_ctl.tx",
+        "   2.3. Verify R == 0",
+        "   2.4. Verify R == 0",
+    ]
+    # Each check took the read of its own call.
+    record = json.loads((project.path / "run.json").read_text())
+    assert [[r["target"]["concrete"] for r in e["reads"]] for e in record["tests"][0]["steps"][0]["entries"]] == [
+        ["dev.block.esmi1_ctl.tx"], ["dev.block.esmi2_ctl.tx"],
+    ]
+
+
 def test_calls_at_takes_outer_calls(tmp_path):
     path = tmp_path / "calls.py"
     path.write_text("verify.equal(a.equal(b), True)\nverify.equal(x, 1); verify.equal(y, 2)\n")
@@ -539,6 +592,290 @@ def test_children_keep_their_notes(tmp_path):
                                            "passed": True, "note": "first"}]}
     check = to_check(d, str(tmp_path))
     assert check.children[0].note == "first" and check.note is None
+
+
+# --------------------------------------------------------------------------- #
+# Operand names: actual_name= and expected_name= word the check
+# --------------------------------------------------------------------------- #
+
+OPERANDS = '''
+import pytest
+from stepdoc import step
+
+
+@pytest.mark.parametrize("channel", [3])
+def test_readback(verify, tb, channel):
+    wdata = 1
+    with step("Read back"):
+        f = getattr(tb.dev.block, f"esmi{channel}_32dat").txfe
+        verify.equal(f, wdata, actual_name=f"tb.dev.map.block.reg{channel}.F", expected_name="wdata")
+        verify.equal(f, wdata, name="Stored word", actual_name=f"tb.dev.map.block.reg{channel}.F", expected_name="wdata")
+        verify.equal(f, 1, actual_name=f"tb.dev.map.block.reg{channel}.F", note="a literal")
+        verify.equal(getattr(tb.dev.block, f"esmi{channel}_ctl").tx, 0, actual_name="ctl.tx")  # read here
+        verify.equal(f, wdata, expected_name=f"limits[{channel}]")
+        verify.is_true(f, actual_name="flag <set>")
+'''
+
+
+def test_operand_names_word_the_check(project):
+    project.makepyfile(test_operands=OPERANDS)
+    run(project).assert_outcomes(passed=1)
+    assert numbered(lines(project, "procedure.txt")) == [
+        "1. Read back",
+        "   1.1. Read dev.block.esmi<channel>_32dat.txfe -> <f>",
+        "   1.2. Verify tb.dev.map.block.reg<channel>.F == <wdata>",
+        "   1.3. Verify 'Stored word': tb.dev.map.block.reg<channel>.F == <wdata>",
+        "   1.4. Verify tb.dev.map.block.reg<channel>.F == 1 (a literal)",
+        "   1.5. Verify ctl.tx == 0 (read here)",
+        "   1.6. Verify dev.block.esmi<channel>_32dat.txfe == limits[<channel>]",  # named after its read
+        "   1.7. Verify flag <set> is True",
+    ]
+    assert numbered(lines(project, "report.txt"))[1:] == [
+        "   1.1. Read dev.block.esmi3_32dat.txfe -> 1",
+        "   1.2. Verify tb.dev.map.block.reg3.F == wdata (1) -> got 1   ✓",
+        "   1.3. Verify 'Stored word': tb.dev.map.block.reg3.F == wdata (1) -> got 1   ✓",
+        "   1.4. Verify tb.dev.map.block.reg3.F == 1 (a literal) -> got 1   ✓",
+        "   1.5. Verify ctl.tx == 0 (read here) -> got 0   ✓",
+        "   1.6. Verify dev.block.esmi3_32dat.txfe == limits[3] (1) -> got 1   ✓",
+        "   1.7. Verify flag <set> is True -> got 1   ✓",
+    ]
+    record = json.loads((project.path / "run.json").read_text())
+    jsonschema.validate(record, SCHEMA)
+    entries = record["tests"][0]["steps"][0]["entries"]
+    first, named, _, folded, expected_only, _ = entries[1:]
+    assert first["operands"] == {
+        "actual": {"concrete": "tb.dev.map.block.reg3.F", "symbolic": "tb.dev.map.block.reg<channel>.F"},
+        "expected": {"concrete": "wdata", "symbolic": "wdata"},
+    }
+    assert "label" not in first and named["label"] == "Stored word"
+    # The read made on the check's line still goes into the check.
+    assert [r["target"]["concrete"] for r in folded["reads"]] == ["dev.block.esmi3_ctl.tx"]
+    assert expected_only["operands"] == {"expected": {"concrete": "limits[3]", "symbolic": "limits[<channel>]"}}
+
+    # Markdown: the name given with name= is words, the rest one code span.
+    md = render(record, "procedure", "md")
+    assert "1.2. Verify `tb.dev.map.block.reg<channel>.F == <wdata>`" in md
+    assert "1.3. Verify 'Stored word': `tb.dev.map.block.reg<channel>.F == <wdata>`" in md
+    assert "reg3" not in md
+
+    # HTML: <channel> shows as written, the code is one <code>, the label is not.
+    html = render(record, "procedure", "html")
+    code = '<code class="expr">tb.<wbr>dev.<wbr>map.<wbr>block.<wbr>reg&lt;channel&gt;.<wbr>F == &lt;wdata&gt;</code>'
+    assert f"Verify {code}" in html
+    assert f'Verify <span class="label">&#x27;Stored word&#x27;:</span> {code}' in html
+    assert '<code class="expr">flag &lt;set&gt; is True</code>' in html
+    assert "<channel>" not in html and "reg3" not in html
+    css = html.split("</style>")[0]
+    assert "--mono: ui-monospace," in css and "font-variant-ligatures: none" in css
+    assert "http" not in css and "@import" not in css and "@font-face" not in css  # system fonts only
+    # A long name= without spaces wraps like the code after it (narrow screens).
+    assert ".body { flex: 1; min-width: 0; overflow-wrap: anywhere; }" in css
+    report = render(record, "report", "html")
+    assert '<code class="expr">tb.<wbr>dev.<wbr>map.<wbr>block.<wbr>reg3.<wbr>F == wdata (1)</code>' in report
+    assert "reg&lt;channel&gt;" not in report
+
+
+def test_operand_names_in_a_loop_and_across_cases(project):
+    """Every pass and every case reads the same in the procedure: one variant."""
+    project.makepyfile(
+        test_loop='''
+        import pytest
+        from stepdoc import step
+
+
+        @pytest.mark.parametrize("first", [0, 2])
+        def test_channels(verify, tb, first):
+            with step("Every channel"):
+                for channel in (first, first + 1):
+                    f = getattr(tb.dev.block, f"esmi{channel}_ctl").rx
+                    verify.equal(f, 1, actual_name=f"block.reg{channel}.F")
+            with step("Polled"):
+                for _ in range(3):
+                    verify.equal(tb.dev.block.esmi1_ctl.rx, 1, actual_name="block.reg1.F")
+        '''
+    )
+    run(project).assert_outcomes(passed=2)
+    procedure = lines(project, "procedure.txt")
+    assert "Variant for" not in "\n".join(procedure)
+    assert numbered(procedure) == [
+        "1. Every channel",
+        "   1.1. Read dev.block.esmi<channel>_ctl.rx -> <f>",
+        "   1.2. Read dev.block.esmi<channel>_ctl.rx -> <f>",
+        "   1.3. Verify block.reg<channel>.F == 1",
+        "   1.4. Verify block.reg<channel>.F == 1",
+        "2. Polled",
+        *[f"   2.{i}. Verify block.reg1.F == 1" for i in (1, 2, 3)],
+    ]
+    report = numbered(lines(project, "report.txt"))
+    for i, channel in ((3, 0), (4, 1), (3, 2), (4, 3)):  # each pass and case names its register
+        assert f"   1.{i}. Verify block.reg{channel}.F == 1 -> got 1   ✓" in report
+    record = json.loads((project.path / "run.json").read_text())
+    polled = record["tests"][0]["steps"][1]["entries"]
+    assert [len(e["reads"]) for e in polled] == [1, 0, 0] and polled[0]["reads"][0]["count"] == 3
+
+
+def _named(**fields):
+    d = {"check_type": "equal", "passed": True, "actual": 240, "expected": 243, "auto_name": True,
+         "name": "dev.reg3.F", "actual_name": "dev.reg3.F", "actual_name_symbolic": "dev.reg<channel>.F",
+         "description": "Verify 'dev.reg3.F' == wdata (243)", "expected_name": "wdata", **fields}
+    return {k: v for k, v in d.items() if v is not None}
+
+
+@pytest.mark.parametrize(
+    "d, text, symbolic",
+    [
+        (_named(), "dev.reg3.F == wdata (243)", "dev.reg<channel>.F == <wdata>"),
+        (_named(name="Stored word", auto_name=None, description="Verify 'Stored word' == wdata (243)"),
+         "'Stored word': dev.reg3.F == wdata (243)", "'Stored word': dev.reg<channel>.F == <wdata>"),
+        # A plain name is shown as given; no symbolic text when nothing differs.
+        (_named(actual_name_symbolic=None, expected_name=None, description="Verify 'dev.reg3.F' == 243"),
+         "dev.reg3.F == 243", None),
+        (_named(expected_name_symbolic="limits[<channel>]", expected_name="limits[3]",
+                description="Verify 'dev.reg3.F' == limits[3] (243)"),
+         "dev.reg3.F == limits[3] (243)", "dev.reg<channel>.F == limits[<channel>]"),
+        (_named(check_type="approx", units="V", expected_name="nominal",
+                description="Verify 'dev.reg3.F' == nominal (3.3V) ± 0.05V (abs) ± 1% (rel)"),
+         "dev.reg3.F == nominal (3.3V) ± 0.05V (abs) ± 1% (rel)",
+         "dev.reg<channel>.F == <nominal> V ± 0.05V (abs) ± 1% (rel)"),
+        (_named(check_type="greater_equal", units="dB", expected_name="floor",
+                description="Verify 'dev.reg3.F' >= floor (-3dB)"),
+         "dev.reg3.F >= floor (-3dB)", "dev.reg<channel>.F >= <floor> dB"),
+        (_named(check_type="length", description="Verify 'dev.reg3.F' has length n (2)", expected_name="n"),
+         "dev.reg3.F has length n (2)", "dev.reg<channel>.F has length <n>"),
+        (_named(check_type="contains", expected_name=None, description="Verify 'dev.reg3.F' contains 'b'"),
+         "dev.reg3.F contains 'b'", "dev.reg<channel>.F contains 'b'"),
+        (_named(check_type="between", expected_name=None, description="Verify 'dev.reg3.F' ∈ [1A, 9A]"),
+         "dev.reg3.F ∈ [1A, 9A]", "dev.reg<channel>.F ∈ [1A, 9A]"),
+        (_named(check_type="is_instance", expected_name=None, description="Verify 'dev.reg3.F' is instance of int"),
+         "dev.reg3.F is instance of int", "dev.reg<channel>.F is instance of int"),
+        # Names with operators, quotes, parentheses and backticks stay as written.
+        (_named(name="it's `a` == (b) < c", actual_name="it's `a` == (b) < c", actual_name_symbolic=None,
+                check_type="less", expected_name="x (y) ± z == 1",
+                description="Verify 'it's `a` == (b) < c' < x (y) ± z == 1 (30)"),
+         "it's `a` == (b) < c < x (y) ± z == 1 (30)", "it's `a` == (b) < c < <x (y) ± z == 1>"),
+        # ``<`` and ``>`` that compare are not a variable part: the name gets its ``<...>``.
+        (_named(expected_name="a < b > c", description="Verify 'dev.reg3.F' == a < b > c (243)"),
+         "dev.reg3.F == a < b > c (243)", "dev.reg<channel>.F == <a < b > c>"),
+        (_named(expected_name="lim[<i + 1>]", description="Verify 'dev.reg3.F' == lim[<i + 1>] (243)"),
+         "dev.reg3.F == lim[<i + 1>] (243)", "dev.reg<channel>.F == lim[<i + 1>]"),
+        # Parts pytest-verifier found are parts, however they read.
+        (_named(expected_name="lim 3", expected_name_symbolic="lim < channel >",
+                description="Verify 'dev.reg3.F' == lim 3 (243)"),
+         "dev.reg3.F == lim 3 (243)", "dev.reg<channel>.F == lim < channel >"),
+        # An expected name alone: the checked value keeps the name of the check.
+        (_named(name="Level", auto_name=None, actual_name=None, actual_name_symbolic=None,
+                description="Verify 'Level' == wdata (243)"),
+         "'Level' == wdata (243)", "'Level' == <wdata>"),
+    ],
+)
+def test_operand_names_of_every_shape(tmp_path, d, text, symbolic):
+    check = to_check(d, str(tmp_path))
+    assert (check.text, check.symbolic_text) == (text, symbolic)
+    record = run_record([case_record(_recorded(check))])
+    jsonschema.validate(record, SCHEMA)
+    if symbolic is not None:  # the procedure never shows this run's name
+        for fmt in ("text", "md", "html"):
+            assert "reg3" not in render(record, "procedure", fmt).split("</style>")[-1]
+
+
+def _recorded(check):
+    with Recorder() as rec:
+        pass
+    rec.unscoped.append(check)
+    return rec
+
+
+def test_the_procedure_names_the_expected_value_whatever_the_description_shows(tmp_path):
+    # pytest-verifier shortened the expected name in its description: the report
+    # reads as the description has it, the procedure is built from the name itself.
+    cut = _named(expected_name="w" * 300, description="Verify 'dev.reg3.F' == www… (243)")
+    check = to_check(cut, str(tmp_path))
+    assert (check.text, check.symbolic_text) == (
+        "dev.reg3.F == www… (243)", f"dev.reg<channel>.F == <{'w' * 300}>")
+    assert check.operands is not None and check.operands["expected"] == {"concrete": "w" * 300, "symbolic": "w" * 300}
+    # An approx keeps its tolerances: the description's last parts, one per tolerance.
+    d = _named(check_type="approx", units="V", expected_name=f"table[3].{'n' * 300}", abs_tol=0.5, rel_tol=0.01,
+               expected_name_symbolic=f"table[<channel>].{'n' * 300}",
+               description="Verify 'dev.reg3.F' == table[3].nnn… (3.3V) ± 0.5V (abs) ± 1% (rel)")
+    check = to_check(d, str(tmp_path))
+    assert check.text == "dev.reg3.F == table[3].nnn… (3.3V) ± 0.5V (abs) ± 1% (rel)"
+    assert check.symbolic_text == f"dev.reg<channel>.F == table[<channel>].{'n' * 300} V ± 0.5V (abs) ± 1% (rel)"
+    # Without them in the record the tolerance is not known: worded as without the name.
+    d = _named(check_type="approx", description="Verify 'dev.reg3.F' == www… (3.3) ± 0.5")
+    check = to_check(d, str(tmp_path))
+    assert check.symbolic_text == "dev.reg<channel>.F == www… (3.3) ± 0.5" and "expected" not in check.operands
+    # Line breaks and control characters in a name read as a space: one line in every document.
+    d = _named(name="dev.reg3\t.F", actual_name=" dev.reg3\t.F\n", actual_name_symbolic="dev.reg<channel>\t.F",
+               expected_name="two\nlines\x85here\ud800", description="Verify 'dev.reg3\\t.F' == two\\nlines (243)")
+    check = to_check(d, str(tmp_path))
+    assert check.text == "dev.reg3 .F == two\\nlines (243)"
+    assert check.symbolic_text == "dev.reg<channel> .F == <two lines here>"
+    assert check.operands == {
+        "actual": {"concrete": "dev.reg3 .F", "symbolic": "dev.reg<channel> .F"},
+        "expected": {"concrete": "two lines here", "symbolic": "two lines here"},
+    }
+    render(run_record([case_record(_recorded(check))]), "procedure", "html").encode("utf-8")
+    # Other spaces and invisible characters are the name's own.
+    d = _named(actual_name="dev\u00a0reg\u200b3", actual_name_symbolic=None, expected_name=None,
+               name="dev\u00a0reg\u200b3", description="Verify 'dev\u00a0reg\u200b3' == 243")
+    assert to_check(d, str(tmp_path)).text == "dev\u00a0reg\u200b3 == 243"
+
+
+def test_operand_names_that_cannot_be_worded_are_left_out(tmp_path):
+    # A description of another shape: as before.
+    odd = to_check(_named(description="something else"), str(tmp_path))
+    assert (odd.text, odd.symbolic_text, odd.operands) == ("something else", None, None)
+    # Names that are not text, or blank: as before.
+    for bad in ("", "   ", "\n\t", 3, None, ["x"]):
+        d = _named(actual_name=bad, expected_name=bad, name="N", auto_name=None, description="Verify 'N' == 243")
+        check = to_check(d, str(tmp_path))
+        assert (check.text, check.symbolic_text, check.operands) == ("'N' == 243", None, None)
+    # ``contains`` takes no expected name: one in a record is not used.
+    d = _named(check_type="contains", description="Verify 'dev.reg3.F' contains wdata (243)")
+    assert to_check(d, str(tmp_path)).symbolic_text == "dev.reg<channel>.F contains wdata (243)"
+
+
+def test_children_are_worded_with_their_operand_names(tmp_path):
+    children = [_named(name=f"reg{ch}.F", actual_name=f"reg{ch}.F", actual_name_symbolic="reg<ch>.F",
+                       description=f"Verify 'reg{ch}.F' == wdata (243)", passed=False) for ch in (0, 1)]
+    d = {"check_type": "all_satisfy", "name": "All", "passed": False, "child_checks": children,
+         "description": "Verify all items in 'All' satisfy condition (2 items)"}
+    record = run_record([case_record(_recorded(to_check(d, str(tmp_path))))])
+    jsonschema.validate(record, SCHEMA)
+    assert render(record, "procedure", "text").splitlines()[-2:] == ["      - Verify reg<ch>.F == <wdata>"] * 2
+    assert render(record, "report", "text").splitlines()[-2:] == [
+        "      - Verify reg0.F == wdata (243) -> got 240   ✗",
+        "      - Verify reg1.F == wdata (243) -> got 240   ✗",
+    ]
+
+
+def test_records_without_operand_names_read_as_before(tmp_path):
+    """A record of an older pytest-verifier reads as it did; its name is words in
+    Markdown and HTML. A run record written before ``label`` is all code there."""
+    old = {"check_type": "equal", "name": "HTTP status", "description": "Verify 'HTTP status' == 201",
+           "passed": True, "actual": 201, "expected": 201}
+    check = to_check(old, str(tmp_path))
+    assert (check.text, check.symbolic_text, check.operands, check.label) == (
+        "'HTTP status' == 201", None, None, "HTTP status")
+    record = run_record([case_record(_recorded(check))])
+    entry = record["tests"][0]["unscoped"][0]
+    assert "operands" not in entry and entry["label"] == "HTTP status"
+    assert "- Verify 'HTTP status' == 201 -> got 201   ✓" in render(record, "report", "text")
+    assert "- Verify 'HTTP status' `== 201` → `got 201` ✓" in render(record, "report", "md")
+    html = render(record, "report", "html")
+    assert 'Verify <span class="label">&#x27;HTTP status&#x27;</span> <code class="expr">== 201</code>' in html
+    del entry["label"]
+    assert "- Verify 'HTTP status' == 201 -> got 201   ✓" in render(record, "report", "text")
+    assert "- Verify `'HTTP status' == 201` → `got 201` ✓" in render(record, "report", "md")
+    assert 'Verify <code class="expr">&#x27;HTTP status&#x27; == 201</code>' in render(record, "report", "html")
+
+
+def test_markdown_code_spans_hold_backticks_and_pipes(tmp_path):
+    d = _named(name="a`b``c | d", actual_name="a`b``c | d", actual_name_symbolic=None, expected_name=None,
+               description="Verify 'a`b``c | d' == 243")
+    record = run_record([case_record(_recorded(to_check(d, str(tmp_path))))])
+    assert "- Verify ``` a`b``c | d == 243 ```" in render(record, "procedure", "md")
+    assert '<code class="expr">a`b``c | d == 243</code>' in render(record, "procedure", "html")
 
 
 # --------------------------------------------------------------------------- #

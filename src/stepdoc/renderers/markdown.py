@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .common import (
     OUTCOME_TEXT,
     STATUS_MARK,
@@ -19,8 +21,10 @@ from .common import (
 def _code(text: str) -> str:
     if not text:
         return ""
-    fence = "``" if "`" in text else "`"
-    pad = " " if fence == "``" else ""
+    # A fence longer than any run of backticks inside (an operand name may have some).
+    runs = re.findall(r"`+", text)
+    fence = "`" * (max(map(len, runs), default=0) + 1)
+    pad = " " if runs else ""
     return f"{fence}{pad}{text}{pad}{fence}"
 
 
@@ -39,7 +43,8 @@ def _md_line(line: Line) -> str:
         parts = [head]
     else:
         num = f"{line.number}. " if line.number else ""
-        parts = [num + " ".join(p for p in (line.verb, _code(line.code)) if p)]
+        label = _prose(line.label) if line.label else ""
+        parts = [num + " ".join(p for p in (line.verb, label, _code(line.code)) if p)]
         if line.aside:
             parts.append(f"({_prose(line.aside)})")
         if line.result:
