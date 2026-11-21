@@ -60,6 +60,25 @@ Rules that keep the procedure readable:
    around the `for`/`while`. With a title it is a step of its own (top level or
    nested); add `counter="write_count"` (and `inc=4` when it does not grow by 1)
    when the test counts the passes. See [references/bridges.md](references/bridges.md).
+10. **Document the test in its docstring.** A summary line (and paragraphs), then
+    optionally `Objective:` and `Acceptance criteria:` (also `Pass criteria:`),
+    each a sentence or a `-`/`1.` list, text on the heading's line or indented
+    under it. The procedure and the report show them above the parameters and
+    steps; other lines ending in `:` stay text. Only the test function's own
+    docstring counts, not a class's or module's.
+
+    ```python
+    def test_cmd_fifo_fill(esm_dev, channel, verify):
+        """Fill the CMD FIFO until the TX flag sets.
+
+        Objective:
+            Confirm the FIFO accepts its full depth before it reports full.
+
+        Acceptance criteria:
+            1. The TX flag sets after exactly 500 writes.
+            2. No write is lost or reported as an error.
+        """
+    ```
 
 ## Bridges: where actions come from
 

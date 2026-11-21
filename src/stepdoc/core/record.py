@@ -21,9 +21,9 @@ from typing import Any, Iterable, Optional, Union
 from .model import Action, Check, Each, Location, Loop, Repeat, Step
 from .recorder import Recorder
 
-SCHEMA_ID = "urn:stepdoc:schema:run-record:0.4"  # no published URL yet
-SCHEMA_VERSION = "0.4"
-READABLE_VERSIONS = ("0.1", "0.2", "0.3", "0.4")
+SCHEMA_ID = "urn:stepdoc:schema:run-record:0.5"  # no published URL yet
+SCHEMA_VERSION = "0.5"
+READABLE_VERSIONS = ("0.1", "0.2", "0.3", "0.4", "0.5")
 """Each version only adds fields; renderers read older records too."""
 
 
@@ -205,13 +205,15 @@ def case_record(
     seed: Any = None,
     param_info: Optional[dict[str, dict[str, Any]]] = None,
     vector: Optional[dict[str, Any]] = None,
+    doc: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """One test case. ``procedure_id`` groups cases that share a procedure (the
     test without its parameter id); ``outcome`` is the runner's verdict.
     ``param_info`` describes parameters (PAR-3: ``{"level": {"domain": "integer
     0 … 4095", "description": "DAC code"}}``) and ``vector`` names the generated
     row the case runs (``{"source": "strategy", "strategy": "new_user", "kind":
-    "directed", "name": "youngest"}``); adapters provide both."""
+    "directed", "name": "youngest"}``); adapters provide both. ``doc`` is the test's parsed
+    docstring (DOC-1, :func:`stepdoc.core.docstring.parse_docstring`)."""
     rec.resolve()
     ctx = _Ctx(rec.started, os.getcwd() if root is None else root)
     tid = test_id or rec.name
@@ -230,6 +232,7 @@ def case_record(
         "steps": [_step(s, ctx) for s in rec.steps],
         **({"param_info": to_jsonable(param_info)} if param_info else {}),
         **({"vector": to_jsonable(vector)} if vector else {}),
+        **({"doc": dict(doc)} if doc else {}),
     }
 
 

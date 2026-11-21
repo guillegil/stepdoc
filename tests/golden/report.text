@@ -1,0 +1,21 @@
+tests/t.py::test_dev[1]   PASSED
+  level=1
+1. Set `dac` level   ✓ 1 ms
+   Note: The DAC settles in 1 ms.
+   1.1. dev.map.dac.level = 1
+   1.2. Read dev.map.adc.value -> 4
+2. Check   ✓ 1 ms
+   2.1. Verify adc == 4 -> got 4   ✓
+
+tests/t.py::test_dev[2]   FAILED
+  level=2
+1. Set `dac` level   ✓ 1 ms
+   Note: The DAC settles in 1 ms.
+   1.1. dev.map.dac.level = 2
+   1.2. Read dev.map.adc.value -> 8
+2. Check   ✗ 1 ms
+   2.1. Verify adc == 4 -> got 8   ✗
+
+tests/t.py::test_api   PASSED
+1. Create <user> | *x*   ✓ 1 ms
+   1.1. /users  {'name': '<script>'} -> 201

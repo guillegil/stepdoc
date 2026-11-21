@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Added
+- Test descriptions from docstrings (DOC-1). A test function's own docstring is
+  shown under the test's heading, before its parameters and steps, in the
+  procedure (once per test, from the first case that has one) and the report
+  (per case): the text before the first heading as the description, then
+  `Objective:` (`**Objective.** text` when it is one paragraph) and `Acceptance
+  criteria:` (also `Objectives`, `Pass criteria`, `Pass/Fail criteria`,
+  `Acceptance/Pass criteria`, `criterion`; any case; text may follow the colon).
+  A sentence stays a paragraph, `-`/`*` and `1.`/`1)` lines become lists (the
+  author's numbers kept, indented lines joined to the item above), backticks show
+  as code. Other lines ending in `:` stay text; a `Description:` heading is
+  accepted. Class and module docstrings are not read, and a test without a
+  docstring renders as before (HTML adds its `.doc` styles only to pages that
+  show one). Run record schema 0.5: a case may have `doc` (`description`,
+  `objective`, `acceptance`, only those with text, each the section's text as
+  written). The `pytest_stepdoc_test_doc(item, doc)` hook gives other plugins the
+  same dict once per test, before it runs.
 - `verify.all_satisfy` reads as one line (CHK-11). pytest-verifier makes one
   check per item, which used to be one line per item (twelve times `Verify
   'Index error': w & INDEX_ERROR_BIT == 0`). When every item's check reads the

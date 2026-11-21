@@ -93,6 +93,54 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
    `enable_assertion_pass_hook = true`), `step("…", check=...)` and
    `stepdoc.attach_check(...)`. stepdoc never compares values itself.
 
+### Test descriptions
+
+A test function's docstring documents the test. The text before the first
+heading is its description; `Objective:` and `Acceptance criteria:` start the
+other two parts:
+
+```python
+def test_cmd_fifo_fill(esm_dev, channel, verify):
+    """Fill the CMD FIFO until the TX flag sets.
+
+    Objective:
+        Confirm the FIFO accepts its full depth before it reports full.
+
+    Acceptance criteria:
+        1. The TX flag sets after exactly 500 writes.
+        2. No write is lost or reported as an error.
+    """
+```
+
+The procedure (once per test) and the report (per case) show it under the test's
+heading, before its parameters and steps:
+
+```markdown
+## test_cmd_fifo_fill
+
+_tests/test_fifo.py::test_cmd_fifo_fill · 2 cases_
+
+Fill the CMD FIFO until the TX flag sets.
+
+**Objective.** Confirm the FIFO accepts its full depth before it reports full.
+
+**Acceptance criteria**
+
+1. The TX flag sets after exactly 500 writes.
+2. No write is lost or reported as an error.
+```
+
+- Headings are matched without regard to case, need the colon and may have the
+  text on the same line (`Objective: Show that ...`). `Objectives`, `Pass
+  criteria`, `Pass/Fail criteria`, `Acceptance/Pass criteria` and `criterion`
+  work too; a `Description:` heading is accepted but not needed.
+- Acceptance criteria are a sentence, a bullet list (`-`, `*`) or a numbered list
+  (`1.`, `1)`, numbers kept as written). Indented lines continue the item above.
+- Any other line ending in `:` is text of the part it is in; nothing is dropped.
+  Backticks show as code, as in step titles.
+- Only the test function's own docstring counts, not a class's or a module's. A
+  test without one looks as before.
+
 ### Keeping documents readable
 
 - **Setup and teardown.** Steps run by fixtures go into a Setup section (S1, S2…)
@@ -342,7 +390,8 @@ not judged, but verify still judges them, so a failing one still fails the test.
 Other packages can ship adapters through the `stepdoc.adapters` entry-point
 group (a subclass of `stepdoc.adapters.Adapter`). Plugins can also follow steps
 without importing stepdoc, through the `pytest_stepdoc_step_started`,
-`pytest_stepdoc_step_finished` and `pytest_stepdoc_record_ready` hooks
+`pytest_stepdoc_step_finished`, `pytest_stepdoc_test_doc` (a test's parsed
+docstring, once before it runs) and `pytest_stepdoc_record_ready` hooks
 (implement them with `@pytest.hookimpl(optionalhook=True)`).
 
 ## Rendering a saved record

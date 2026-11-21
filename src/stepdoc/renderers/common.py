@@ -412,3 +412,98 @@ def anchors(ids: list[str]) -> list[str]:
 
 def short_name(procedure_id: str) -> str:
     return procedure_id.rsplit("::", 1)[-1]
+
+
+# --------------------------------------------------------------------------- #
+# A test's docstring (DOC-1)
+# --------------------------------------------------------------------------- #
+
+DOC_TITLE = {"objective": "Objective", "acceptance": "Acceptance criteria"}
+
+_BULLET = re.compile(r"([-*])\s+(.*)")
+_NUMBER = re.compile(r"(\d+)([.)])\s+(.*)")
+
+
+@dataclass
+class Block:
+    """A paragraph (``kind == "p"``, one item) or a list (``"ul"``, ``"ol"``) of
+    one section of a docstring. ``numbers`` are the author's (``ol`` only)."""
+
+    kind: str
+    items: list[str]
+    numbers: list[int]
+
+
+def doc_blocks(text: str) -> list[Block]:
+    """Paragraphs and lists of one docstring section (``parse_docstring``). Lines
+    of a paragraph, and lines under a list item (indented, or right after it), are
+    joined by a space; a blank line ends a paragraph, not a list."""
+    blocks: list[Block] = []
+    open_item = False  # the last line belongs to a list item
+    gap = False  # a blank line since the last text
+    for line in text.split("\n"):
+        if not line.strip():
+            gap = True
+            continue
+        indented = line[:1].isspace()
+        bullet, number = _BULLET.fullmatch(line), _NUMBER.fullmatch(line)
+        last = blocks[-1] if blocks else None
+        if bullet or number:
+            kind, item = ("ul", bullet.group(2)) if bullet else ("ol", number.group(3))  # type: ignore[union-attr]
+            if last is None or last.kind != kind:
+                last = Block(kind, [], [])
+                blocks.append(last)
+            last.items.append(item.strip())
+            if number:
+                last.numbers.append(int(number.group(1)))
+            open_item = True
+        elif last is not None and (
+            (last.kind != "p" and open_item and (indented or not gap)) or (last.kind == "p" and not gap)
+        ):
+            last.items[-1] += " " + line.strip()
+        else:
+            blocks.append(Block("p", [line.strip()], []))
+            open_item = False
+        gap = False
+    return blocks
+
+
+def case_doc(test: Record) -> Optional[dict[str, str]]:
+    """A case's parsed docstring, when the record has one (schema 0.5)."""
+    doc = test.get("doc")
+    return doc if isinstance(doc, dict) and doc else None
+
+
+def procedure_doc(proc: "Procedure") -> Optional[dict[str, str]]:
+    """The docstring of the first case of a procedure that has one."""
+    for case in proc.cases:
+        doc = case_doc(case)
+        if doc:
+            return doc
+    return None
+
+
+def doc_text_lines(doc: dict[str, str], indent: str = "  ") -> list[str]:
+    """A docstring as plain indented lines (the text renderer)."""
+    out: list[str] = []
+    for block in doc_blocks(doc.get("description", "")):
+        out.extend(_plain_block(block, indent))
+    for key in ("objective", "acceptance"):
+        if not doc.get(key):
+            continue
+        blocks = doc_blocks(doc[key])
+        if key == "objective" and len(blocks) == 1 and blocks[0].kind == "p":
+            out.append(f"{indent}{DOC_TITLE[key]}: {blocks[0].items[0]}")
+            continue
+        out.append(f"{indent}{DOC_TITLE[key]}:")
+        for block in blocks:
+            out.extend(_plain_block(block, indent + "  "))
+    return out
+
+
+def _plain_block(block: Block, indent: str) -> list[str]:
+    if block.kind == "p":
+        return [indent + block.items[0]]
+    if block.kind == "ul":
+        return [f"{indent}- {item}" for item in block.items]
+    return [f"{indent}{n}. {item}" for n, item in zip(block.numbers, block.items)]

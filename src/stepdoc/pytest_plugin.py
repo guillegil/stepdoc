@@ -19,6 +19,7 @@ from typing import Any, Generator, Optional
 import pytest
 
 from . import adapters as _adapters
+from .core.docstring import parse_docstring
 from .core.model import Check, Location, Section, Step
 from .core.record import case_record, dumps, run_record
 from .core.recorder import Recorder, current_recorder, is_dry_run
@@ -129,6 +130,15 @@ def _params(item: pytest.Item) -> tuple[Optional[str], dict[str, Any]]:
     return callspec.id, dict(callspec.params)
 
 
+def _doc(item: pytest.Item) -> Optional[dict[str, str]]:
+    """DOC-1: the test function's own docstring, parsed. Not a class's or a
+    module's, and not one inherited."""
+    if not isinstance(item, pytest.Function):
+        return None
+    text = getattr(getattr(item, "function", None), "__doc__", None)
+    return parse_docstring(text) if isinstance(text, str) else None
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) -> Generator[None, Any, Any]:
     state: _State = item.config.stash[_state_key]
@@ -147,6 +157,9 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
         hook(item=item, step=s)
 
     rec.listeners.append(notify)
+    doc = _doc(item)
+    if doc:
+        item.ihook.pytest_stepdoc_test_doc(item=item, doc=dict(doc))
     try:
         with rec:
             return (yield)
@@ -167,6 +180,7 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
                 case=case,
                 params=params,
                 outcome=item.stash.get(_outcome_key, None),
+                doc=doc,
                 **extra,
             )
         )

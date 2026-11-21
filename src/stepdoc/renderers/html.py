@@ -9,12 +9,17 @@ from typing import Optional
 
 from ..core.fmt import spans
 from .common import (
+    DOC_TITLE,
     OUTCOME_TEXT,
     STATUS_MARK,
+    Block,
     Line,
     Procedure,
     Record,
     anchors,
+    case_doc,
+    doc_blocks,
+    procedure_doc,
     procedures,
     short_name,
     show,
@@ -76,10 +81,20 @@ nav ol { padding-left: 20px; margin: 8px 0; }
 }
 """
 
+# Only on pages that show a docstring, so other pages stay as they were.
+_DOC_CSS = """
+.doc { margin: 8px 0 16px; overflow-wrap: anywhere; }
+.doc p { margin: 6px 0; }
+.doc ul, .doc ol { margin: 4px 0 8px; padding-left: 24px; }
+.doc li { margin: 2px 0; }
+.doc-title { font-weight: 600; }
+"""
+
 _MARK_CLASS = {"✓": "mark-pass", "✗": "mark-fail", "?": "mark-unknown", "·": "mark-unknown"}
 
 
 def _page(title: str, record: Record, body: list[str]) -> str:
+    css = _CSS + _DOC_CSS if any(case_doc(t) for t in record["tests"]) else _CSS
     gen = record.get("generator") or {}
     meta = f"stepdoc {gen.get('version', '')} · {record.get('created_at', '')}"
     if record.get("dry_run"):
@@ -92,7 +107,7 @@ def _page(title: str, record: Record, body: list[str]) -> str:
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
             f"<title>{escape(title)}</title>",
-            f"<style>{_CSS}</style>",
+            f"<style>{css}</style>",
             "</head>",
             "<body><main>",
             f"<h1>{escape(title)}</h1>",
@@ -124,6 +139,39 @@ def _expr(text: str) -> str:
 def _title(text: str) -> str:
     """A step title, its `code` spans (FMT-1) as <code>."""
     return "".join(_code(t) if code else escape(t) for t, code in spans(text))
+
+
+def _html_block(block: Block) -> str:
+    if block.kind == "p":
+        return f"<p>{_title(block.items[0])}</p>"
+    if block.kind == "ul":
+        return "<ul>" + "".join(f"<li>{_title(item)}</li>" for item in block.items) + "</ul>"
+    start = block.numbers[0]
+    in_order = block.numbers == list(range(start, start + len(block.numbers)))
+    attr = "" if not in_order or start == 1 else f' start="{start}"'
+    items = "".join(
+        ("<li>" if in_order else f'<li value="{n}">') + f"{_title(item)}</li>"
+        for n, item in zip(block.numbers, block.items)
+    )
+    return f"<ol{attr}>{items}</ol>"
+
+
+def _doc(doc: Optional[dict[str, str]]) -> list[str]:
+    """DOC-1: a test's description, objective and acceptance criteria."""
+    if not doc:
+        return []
+    parts = [_html_block(b) for b in doc_blocks(doc.get("description", ""))]
+    for key in ("objective", "acceptance"):
+        if not doc.get(key):
+            continue
+        blocks = doc_blocks(doc[key])
+        if key == "objective" and len(blocks) == 1 and blocks[0].kind == "p":
+            title = f'<span class="doc-title">{DOC_TITLE[key]}.</span>'
+            parts.append(f"<p>{title} {_title(blocks[0].items[0])}</p>")
+            continue
+        parts.append(f'<p class="doc-title">{DOC_TITLE[key]}</p>')
+        parts += [_html_block(b) for b in blocks]
+    return [f'<div class="doc">{"".join(parts)}</div>']
 
 
 def _line(line: Line) -> str:
@@ -191,6 +239,7 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
         n = len(proc.cases)
         body.append(f'<h2 id="{anchor}">{escape(short_name(proc.procedure_id))}</h2>')
         body.append(f'<p class="meta">{escape(proc.procedure_id)} · {n} case{"s" * (n != 1)}</p>')
+        body += _doc(procedure_doc(proc))
         body += _params_table(proc)
         if proc.setup is not None:
             body.append(_lines(test_lines(proc.setup, symbolic=True, sections=("setup",))))
@@ -239,6 +288,7 @@ def render_report(record: Record, title: str = "Test report") -> str:
         if t["seed"] is not None:
             meta.append(f"seed {show(t['seed'])}")
         body.append(f'<p class="meta">{escape(" · ".join(meta))}</p>')
+        body += _doc(case_doc(t))
         if t["params"]:
             params = ", ".join(_code(f"{k} = {show(v)}") for k, v in t["params"].items())
             note = vector_note(t)

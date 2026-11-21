@@ -25,6 +25,22 @@ def pytest_stepdoc_step_finished(item: pytest.Item, step: Any) -> None:
 
 
 @pytest.hookspec
+def pytest_stepdoc_test_doc(item: pytest.Item, doc: dict[str, str]) -> None:
+    """The documentation of ``item``, from its test function's own docstring
+    (DOC-1). Called once per test, before it runs (before any retry of it), and
+    only for a test whose docstring has text. ``doc`` is plain JSON data with
+    only the keys that have text:
+
+    - ``"description"``: the text before the first heading (summary and paragraphs),
+    - ``"objective"``: the ``Objective:`` section,
+    - ``"acceptance"``: the ``Acceptance criteria:`` section (also ``Pass criteria:``).
+
+    Each value is the section's text, dedented, as written: list markers
+    (``1.``, ``-``) and backticks are kept. The same dict is the case's ``doc``
+    in the run record."""
+
+
+@pytest.hookspec
 def pytest_stepdoc_record_ready(config: pytest.Config, record: dict[str, Any]) -> None:
     """The JSON run record of the session, before stepdoc writes any file. It is
     plain JSON data in the schema of ``stepdoc/schema/run-record.schema.json``.
