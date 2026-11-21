@@ -9,7 +9,9 @@ from .symbolic import Resolution, Site, apply_target_pattern
 
 Status = Literal["passed", "failed", "error", "not_run", "unknown"]
 Direction = Literal["in", "out", "exchange"]
-Section = Literal["setup", "procedure", "teardown"]
+Section = Literal["precondition", "setup", "procedure", "teardown"]
+"""``precondition`` holds the blocks made with ``stepdoc.precondition()`` (PRE-1),
+whichever phase they ran in; the others follow the phase (STEP-8)."""
 
 # Used when a bridge does not say which way data flows. Unknown ops are "in".
 DEFAULT_DIRECTIONS: dict[str, Direction] = {
@@ -258,6 +260,20 @@ class Step:
     """Why, or anything the reader should know, from ``step(..., note=...)``."""
     loop: Optional[Loop] = None
     """Set when the step is a titled ``repeat()`` block: its entries are one pass."""
+    applied_in: Optional[str] = None
+    """Set on a pre-condition this test did not apply itself (PRE-3): the id of the
+    test in which a shared fixture applied it. Such a step has no entries; its
+    status is the one the pre-condition got when it was applied."""
+    origin: Optional["Step"] = field(default=None, repr=False, compare=False)
+    """With ``applied_in``: the step recorded when the pre-condition was applied
+    (in this process). Never serialised."""
+    opened_in: Optional[Section] = field(default=None, repr=False, compare=False)
+    """The section of the phase the step was opened in. For a pre-condition, the
+    only phase whose late checks (an adapter's) may be its own. Never serialised."""
+    within: Optional["Step"] = field(default=None, repr=False, compare=False)
+    """For a pre-condition written inside a step (PRE-2): that step. The record
+    lists the pre-condition at the top level; adapters that match checks by
+    source lines need to know its lines are inside that step's. Never serialised."""
 
     @property
     def actions(self) -> list[Action]:

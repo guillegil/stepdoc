@@ -96,7 +96,7 @@ def _md_line(line: Line) -> str:
     if line.mark:
         parts.append(line.mark)
     if line.note:
-        parts.append(f"_{line.note}_")
+        parts.append(f"_{_prose(line.note)}_")
     text = f"{indent}- " + " ".join(parts)
     if line.remark:  # under the item, as its own paragraph
         text += "\n\n" + "\\\n".join(f"{indent}  > {r}" for r in line.remark.splitlines())
@@ -134,6 +134,10 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
             for name, description, values in rows:
                 cells = [_code(name)] + ([description or ""] if described else []) + [", ".join(_code(v) for v in values)]
                 out.append("| " + " | ".join(cells) + " |")
+            out.append("")
+        if proc.precondition is not None:
+            only = ("precondition",)
+            out += [_md_line(line) for line in test_lines(proc.precondition, symbolic=True, sections=only)]
             out.append("")
         if proc.setup is not None:
             out += [_md_line(line) for line in test_lines(proc.setup, symbolic=True, sections=("setup",))]

@@ -229,6 +229,14 @@ def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
             note = " · ".join(p for p in (times(loop["count"]), note) if p)
         if s.get("error"):
             note = (note + " · " if note else "") + s["error"].splitlines()[0]
+    if s.get("applied_in"):
+        # PRE-3: a shared fixture applied it for an earlier test; both documents say where.
+        if s["status"] in ("failed", "error"):
+            note = f"not established, failed in {s['applied_in']}"
+        else:
+            note = f"already established, applied in {s['applied_in']}"
+        if not symbolic and s.get("error"):
+            note += " · " + s["error"].splitlines()[0]
     title = f"{s['title']} ({loop_words(s['loop'])})" if s.get("loop") else s["title"]
     yield Line(
         s["number"], "", title, mark=mark, note=note, depth=depth, is_step=True, remark=s.get("note")
@@ -236,8 +244,13 @@ def step_lines(s: Record, symbolic: bool, depth: int = 0) -> Iterator[Line]:
     yield from entry_lines(s["entries"], symbolic, depth + 1)
 
 
-SECTIONS = ("setup", "procedure", "teardown")
-SECTION_TITLE = {"setup": "Setup", "procedure": "Procedure", "teardown": "Teardown"}
+SECTIONS = ("precondition", "setup", "procedure", "teardown")
+SECTION_TITLE = {
+    "precondition": "Pre-conditions",
+    "setup": "Setup",
+    "procedure": "Procedure",
+    "teardown": "Teardown",
+}
 
 
 def has_section(test: Record, section: str) -> bool:
@@ -245,10 +258,11 @@ def has_section(test: Record, section: str) -> bool:
 
 
 def test_lines(test: Record, symbolic: bool, sections: tuple[str, ...] = SECTIONS) -> list[Line]:
-    """Lines of one test. Setup and teardown (STEP-8) get a heading; the procedure
-    gets one only when the test has a setup or teardown section to tell it apart."""
+    """Lines of one test. Pre-conditions (PRE-1), setup and teardown (STEP-8) get a
+    heading; the procedure gets one only when the test has another section to
+    tell it apart."""
     lines: list[Line] = []
-    framed = any(has_section(test, s) for s in ("setup", "teardown"))
+    framed = any(has_section(test, s) for s in SECTIONS if s != "procedure")
     for section in sections:
         steps = [s for s in test["steps"] if s.get("section", "procedure") == section]
         loose = [e for e in test["unscoped"] if e.get("section", "procedure") == section]
@@ -291,7 +305,8 @@ def remark_lines(line: Line) -> list[str]:
 def procedure_lines(test: Record, sections: tuple[str, ...] = SECTIONS) -> list[str]:
     out = []
     for line in test_lines(test, symbolic=True, sections=sections):
-        out.append(plain(line))
+        established = line.is_step and line.note  # PRE-3; other notes are the report's
+        out.append(f"{plain(line)}   {line.note}" if established else plain(line))
         out.extend(remark_lines(line))
     return out
 
@@ -323,6 +338,14 @@ class Procedure:
     """The case with the fullest setup section: session-scoped fixtures only set up
     in the first test that uses them."""
     teardown: Optional[Record] = None
+    precondition: Optional[Record] = None
+    """The case with the fullest pre-conditions: the one that applied them, when
+    the others found them already established."""
+
+    @property
+    def framed(self) -> bool:
+        """Whether the procedure needs its own heading, to tell it from the other sections."""
+        return any(c is not None for c in (self.precondition, self.setup, self.teardown))
 
     @property
     def params(self) -> dict[str, list[str]]:
@@ -388,7 +411,14 @@ def procedures(record: Record) -> list[Procedure]:
             else:
                 variants.append((lines, [case]))
         result.append(
-            Procedure(pid, cases, variants, _fullest(cases, "setup"), _fullest(cases, "teardown"))
+            Procedure(
+                pid,
+                cases,
+                variants,
+                _fullest(cases, "setup"),
+                _fullest(cases, "teardown"),
+                _fullest(cases, "precondition"),
+            )
         )
     return result
 

@@ -77,7 +77,8 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
    register write, for example. Text between backticks in a title is shown in
    monospace (`` step("Write into `dut.reg1 = 1`") ``); `stepdoc.fmt.mono(text)`
    writes that for any text, so it works in f-strings:
-   `step(f"Write into {fmt.mono(reg.path)}")`.
+   `step(f"Write into {fmt.mono(reg.path)}")`. `precondition("…")` names a state
+   the test starts from; see [Pre-conditions](#pre-conditions).
 2. **Actions** come from your system under test's own events through a small
    **bridge** in `conftest.py`, for example an httpx event hook or a device's
    register callbacks. stepdoc ships no drivers.
@@ -144,7 +145,9 @@ Fill the CMD FIFO until the TX flag sets.
 ### Keeping documents readable
 
 - **Setup and teardown.** Steps run by fixtures go into a Setup section (S1, S2…)
-  and a Teardown section (T1…), apart from the test's own steps.
+  and a Teardown section (T1…), apart from the test's own steps. A state the
+  test starts from that has a name of its own goes into
+  [Pre-conditions](#pre-conditions) (P1, P2…).
 - **Polling.** The same read (or the same request) repeated from one source line,
   such as `while not dev.map.status.pll_locked: ...`, becomes one line:
   `Poll dev.map.status.pll_locked`, and in the report `-> True (37 reads, 18 ms)`.
@@ -231,6 +234,95 @@ Fill the CMD FIFO until the TX flag sets.
   checks but drops the actions inside it.
 - **Naming a value.** `stepdoc.value("code", level * 2)` returns the value and shows
   it as `<code>` in the procedure, also when it travels through a helper first.
+
+### Pre-conditions
+
+Setup is what a fixture happens to do. A **pre-condition** is a state the system
+must be in before the test, with a name the reader knows: "System Mode A", which
+takes DEV1, DEV2 and DEV3 to get into and which many tests share.
+`stepdoc.precondition("…")` names it. Everything recorded inside (actions, checks,
+steps) belongs to it and goes into a **Pre-conditions** section before Setup,
+numbered P1, P1.1…
+
+Decorate the fixture that brings the system into the state, with `@pytest.fixture`
+on top. In a fixture that yields, the pre-condition is the part before the
+`yield`; what runs after it is ordinary teardown. In a test or a helper, use the
+block form:
+
+```python
+# conftest.py
+@pytest.fixture(scope="session")
+@stepdoc.precondition("System Mode A", note="DEV1 drives the bus; DEV2 and DEV3 listen.")
+def mode_a(dev1, dev2, dev3):
+    dev1.write("ctrl.mode", 1)
+    dev2.write("ctrl.standby", 1)
+    dev3.write("ctrl.standby", 1)
+    assert dev1.regs["ctrl.mode"] == 1
+    yield
+    with step("Leave Mode A"):          # after the yield: ordinary teardown
+        dev1.write("ctrl.mode", 0)
+
+# test_bus.py
+def test_send(mode_a, dev1):
+    with step("Send a frame"):
+        dev1.write("tx.data", 0x55)
+
+def test_receive(mode_a, dev2):
+    with stepdoc.precondition("Receiver enabled"):
+        dev2.write("rx.enable", 1)
+    with step("Read a frame"):
+        dev2.write("rx.pop", 1)
+```
+
+The procedure:
+
+```text
+test_bus.py::test_send
+Pre-conditions
+P1. System Mode A
+   Note: DEV1 drives the bus; DEV2 and DEV3 listen.
+   P1.1. dev1.ctrl.mode = 1
+   P1.2. dev2.ctrl.standby = 1
+   P1.3. dev3.ctrl.standby = 1
+   P1.4. Verify dev1.regs["ctrl.mode"] == 1
+Procedure
+1. Send a frame
+   1.1. dev1.tx.data = 85
+
+test_bus.py::test_receive
+Pre-conditions
+P1. System Mode A   already established, applied in test_bus.py::test_send
+   Note: DEV1 drives the bus; DEV2 and DEV3 listen.
+P2. Receiver enabled
+   P2.1. dev2.rx.enable = 1
+Procedure
+1. Read a frame
+   1.1. dev2.rx.pop = 1
+```
+
+- **Already established.** `mode_a` is a session fixture, so pytest runs it once,
+  for `test_send`. `test_receive` uses it too and still lists the pre-condition,
+  with the test that applied it instead of the actions. The report shows the
+  outcome it got there: `P1. System Mode A   ✓ already established, applied in
+  test_bus.py::test_send`. This follows pytest's fixture cache (session, module
+  and class fixtures): a test for which the fixture runs again shows the
+  pre-condition in full, and so does the first test on each pytest-xdist
+  worker. A test's own pre-conditions come after the ones it found established.
+  A parametrized test's procedure shows the pre-condition in full when one of
+  its cases applied it. When the pre-condition failed where it was applied, the
+  later tests say `not established, failed in test_bus.py::test_send`.
+- **Never part of another step.** A block written inside a step, or a decorated
+  helper called from one, is not an entry of that step. It becomes the next
+  pre-condition (P1, P2…) and the step goes on after it. Only a pre-condition
+  inside another pre-condition is nested (P1.1). A `record=False` on the step
+  around it does not hide the pre-condition's actions.
+- **Any phase.** The section does not depend on where the block runs: in a
+  fixture, the code around it stays in Setup; in the test body, the steps around
+  it stay in the Procedure.
+- Like a step, a pre-condition gets a status, takes `note=`, and an exception
+  inside it is attached to it and raised again. pytest-verifier checks made
+  inside it are placed in it. The decorator also wraps coroutine functions and
+  async generators.
 
 ### Bridges
 

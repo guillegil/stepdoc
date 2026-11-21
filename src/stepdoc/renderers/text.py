@@ -30,12 +30,14 @@ def render_procedure(record: Record) -> str:
             for name, description, values in rows:
                 middle = f"{(description or '').ljust(dwidth)}   " if dwidth else ""
                 out.append(f"  {name.ljust(width)}   {middle}{', '.join(values)}")
+        if proc.precondition is not None:
+            out.extend(procedure_lines(proc.precondition, ("precondition",)))
         if proc.setup is not None:
             out.extend(procedure_lines(proc.setup, ("setup",)))
         for lines, members in proc.variants:
             if len(proc.variants) > 1:
                 out.append(f"Variant for: {', '.join(m['case'] or m['id'] for m in members)}")
-            elif proc.setup is not None or proc.teardown is not None:
+            elif proc.framed:
                 out.append("Procedure")
             out.extend(lines)
         if proc.teardown is not None:

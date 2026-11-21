@@ -47,12 +47,19 @@ def statement_span(path: str, line: int) -> tuple[int, int]:
         return line, line
     best: Optional[ast.stmt] = None
     for node in ast.walk(tree):
-        if isinstance(node, ast.stmt) and node.lineno == line:
+        if isinstance(node, ast.stmt) and line in (node.lineno, _first_line(node)):
             if best is None or (node.end_lineno or line) > (best.end_lineno or line):
                 best = node
     if best is None:
         return line, line
-    return best.lineno, best.end_lineno or line
+    return min(best.lineno, line), best.end_lineno or line
+
+
+def _first_line(node: ast.stmt) -> int:
+    """Where a decorated function starts (its first decorator): the line its code
+    object reports, which is where a ``@precondition`` function is located."""
+    decorators = getattr(node, "decorator_list", None)
+    return min((d.lineno for d in decorators), default=node.lineno) if decorators else node.lineno
 
 
 @lru_cache(maxsize=4096)

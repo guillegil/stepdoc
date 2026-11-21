@@ -20,6 +20,7 @@ Then read it as a reviewer would, and fix the test, not the document.
 | A step with no lines | the step's actions were not recorded | check the bridge is attached in the fixture the test uses |
 | No "Verify" lines for passing asserts | `enable_assertion_pass_hook` is off | set it in the pytest ini and clear `.pyc` caches |
 | Procedure split into variants | different parameters took different code paths | intended? if not, make the steps unconditional |
+| A named state ("Mode A") spread over S1, S2… | its fixture is plain setup | `@stepdoc.precondition("Mode A")` on the fixture ([preconditions.md](preconditions.md)) |
 | Low-level noise from a helper | the helper records every register access | `@step("…", record=False)` on the helper |
 
 ## Good titles
@@ -31,3 +32,5 @@ Then read it as a reviewer would, and fix the test, not the document.
 
 Steps run in fixtures appear under **Setup** (S1…) and **Teardown** (T1…). Put
 bench preparation and cleanup there instead of in the test body.
+A state with a name of its own that tests start from goes under
+**Pre-conditions** (P1…) instead: see [preconditions.md](preconditions.md).

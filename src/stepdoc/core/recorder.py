@@ -90,23 +90,44 @@ class Recorder:
         _current.reset(self._tokens.pop())
 
     # Steps ---------------------------------------------------------------- #
-    def _number_in(self, parent: Optional[Step]) -> str:
+    def _number_in(self, parent: Optional[Step], section: Section) -> str:
         if parent is None:
-            n = sum(1 for s in self.steps if s.section == self.section) + 1
-            return f"{_SECTION_PREFIX[self.section]}{n}"
+            n = sum(1 for s in self.steps if s.section == section) + 1
+            return f"{_SECTION_PREFIX[section]}{n}"
         return f"{parent.number}.{len(parent.entries) + 1}"
 
-    def _open(self, title: str, location: Optional[Location], note: Optional[str] = None) -> Step:
+    def _open(
+        self,
+        title: str,
+        location: Optional[Location],
+        note: Optional[str] = None,
+        *,
+        precondition: bool = False,
+    ) -> Step:
         parent = self._stack[-1] if self._stack else None
+        within: Optional[Step] = None
         self._flush(parent)
-        section = self.section if parent is None else parent.section
+        if precondition and (parent is None or parent.section != "precondition"):
+            # PRE-2: a pre-condition is never part of a setup or procedure step. It
+            # opens at the top of its own section; the step it was written in
+            # goes on after it. What that step does next is not a repeat of what
+            # it did before the pre-condition.
+            around = self._container(parent)
+            self._floors[id(around)] = len(around)
+            within, parent = parent, None
+        if precondition:
+            section: Section = "precondition"
+        else:
+            section = self.section if parent is None else parent.section
         s = Step(
-            number=self._number_in(parent),
+            number=self._number_in(parent, section),
             title=title,
             section=section,
             started=_perf(),
             location=location,
             note=note,
+            opened_in=self.section,
+            within=within,
         )
         if parent is None:
             self.steps.append(s)
@@ -424,7 +445,7 @@ class Recorder:
         return combine(statuses) if statuses else "unknown"
 
 
-_SECTION_PREFIX: dict[Section, str] = {"setup": "S", "procedure": "", "teardown": "T"}
+_SECTION_PREFIX: dict[Section, str] = {"precondition": "P", "setup": "S", "procedure": "", "teardown": "T"}
 
 
 _MAX_PASS = 8
@@ -797,6 +818,199 @@ class step:  # noqa: N801 - public API name from the brief
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             with step(title, record=record, note=note):
                 return fn(*args, **kwargs)
+
+        return wrapper  # type: ignore[return-value]
+
+
+class precondition:  # noqa: N801 - reads like ``step``
+    """``with precondition("System Mode A"):`` · ``@precondition("System Mode A")``
+    (PRE-1).
+
+    A pre-condition is a named state the system must be in before the test, such
+    as an operating mode that many tests share. What is recorded inside the block
+    (steps, actions, checks) belongs to it and goes into the **Pre-conditions**
+    section, apart from the rest of the setup: the block is ``P1``, its entries
+    ``P1.1``, ``P1.2``… Like a step it gets a status, and exceptions are attached
+    to it and re-raised.
+
+    The section does not depend on where the block runs. In a fixture, the code
+    around the block stays in Setup; a block written inside a step is not part
+    of that step (PRE-2). Only a block inside another pre-condition is nested in
+    it (``P1.1``).
+
+    As a decorator it wraps the whole function. On a fixture that yields, the
+    pre-condition is the part before the ``yield``; what runs after it is
+    ordinary teardown::
+
+        @pytest.fixture(scope="session")
+        @stepdoc.precondition("System Mode A")
+        def mode_a(dev1, dev2):
+            ...
+            yield
+            ...
+
+    Under pytest, a test that uses a fixture which applied a pre-condition for an
+    earlier test (session, module or class scope) lists it too, as already
+    established (PRE-3).
+
+    ``note=`` is a sentence for the reader, shown under the line, as on ``step``.
+    """
+
+    def __init__(self, title: str, *, note: Optional[str] = None) -> None:
+        if not isinstance(title, str):
+            raise TypeError(f"a pre-condition's title must be a str, not {type(title).__name__}")
+        self.title = title
+        self.note = _note(note)
+        self._blocks: list[tuple[Recorder, Step, int]] = []
+
+    def __enter__(self) -> Optional[Step]:
+        return self._enter(_caller_location())
+
+    def _enter(self, location: Optional[Location]) -> Optional[Step]:
+        rec = _current.get()
+        if rec is None:
+            return None
+        s = rec._open(self.title, location, self.note, precondition=True)
+        self._blocks.append((rec, s, rec._quiet))
+        if "." not in s.number:
+            # PRE-2: not part of the step it was written in, so that step's
+            # record=False does not reach it.
+            rec._quiet = 0
+        return s
+
+    def __exit__(
+        self,
+        et: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> bool:
+        if not self._blocks:
+            return False
+        rec, s, quiet = self._blocks.pop()
+        rec._quiet = quiet
+        return rec._close(s, exc)
+
+    def __call__(self, fn: F) -> F:
+        # pytest 8.4+ returns a fixture definition object; older versions mark the function.
+        if hasattr(fn, "_fixture_function_marker") or hasattr(fn, "_pytestfixturefunction"):
+            raise TypeError(
+                f"@stepdoc.precondition({self.title!r}) is above @pytest.fixture: "
+                "put @pytest.fixture above @stepdoc.precondition(...)"
+            )
+        title, note = self.title, self.note
+        code = getattr(fn, "__code__", None)
+        where = None if code is None else Location(code.co_filename, code.co_firstlineno)
+
+        def block() -> "precondition":
+            return precondition(title, note=note)
+
+        if inspect.isasyncgenfunction(fn):
+
+            @functools.wraps(fn)
+            async def agen_wrapper(*args: Any, **kwargs: Any) -> Any:
+                gen = fn(*args, **kwargs)
+                b = block()
+                b._enter(where)
+                try:
+                    first = await gen.__anext__()
+                except StopAsyncIteration:
+                    b.__exit__(None, None, None)
+                    return
+                except BaseException as exc:
+                    if not b.__exit__(type(exc), exc, exc.__traceback__):
+                        raise
+                    yield None  # dry-run: the failure is recorded, the test goes on
+                    return
+                b.__exit__(None, None, None)
+                # The rest (a fixture's teardown) is outside the pre-condition.
+                item = first
+                while True:
+                    try:
+                        sent = yield item
+                    except GeneratorExit:
+                        await gen.aclose()
+                        raise
+                    except BaseException as exc:
+                        try:
+                            item = await gen.athrow(exc)
+                        except StopAsyncIteration:
+                            return
+                    else:
+                        try:
+                            item = await gen.asend(sent)
+                        except StopAsyncIteration:
+                            return
+
+            return agen_wrapper  # type: ignore[return-value]
+
+        if inspect.isgeneratorfunction(fn):
+
+            @functools.wraps(fn)
+            def gen_wrapper(*args: Any, **kwargs: Any) -> Any:
+                gen = fn(*args, **kwargs)
+                b = block()
+                b._enter(where)
+                try:
+                    first = next(gen)
+                except StopIteration as stop:
+                    b.__exit__(None, None, None)
+                    return stop.value
+                except BaseException as exc:
+                    if not b.__exit__(type(exc), exc, exc.__traceback__):
+                        raise
+                    yield None  # dry-run: the failure is recorded, the test goes on
+                    return None
+                b.__exit__(None, None, None)
+                # The rest (a fixture's teardown) is outside the pre-condition.
+                item = first
+                while True:
+                    try:
+                        sent = yield item
+                    except GeneratorExit:
+                        gen.close()
+                        raise
+                    except BaseException as exc:
+                        try:
+                            item = gen.throw(exc)
+                        except StopIteration as stop:
+                            return stop.value
+                    else:
+                        try:
+                            item = gen.send(sent)
+                        except StopIteration as stop:
+                            return stop.value
+
+            return gen_wrapper  # type: ignore[return-value]
+
+        if inspect.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                b = block()
+                b._enter(where)
+                try:
+                    result = await fn(*args, **kwargs)
+                except BaseException as exc:
+                    if not b.__exit__(type(exc), exc, exc.__traceback__):
+                        raise
+                    return None
+                b.__exit__(None, None, None)
+                return result
+
+            return async_wrapper  # type: ignore[return-value]
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            b = block()
+            b._enter(where)
+            try:
+                result = fn(*args, **kwargs)
+            except BaseException as exc:
+                if not b.__exit__(type(exc), exc, exc.__traceback__):
+                    raise
+                return None
+            b.__exit__(None, None, None)
+            return result
 
         return wrapper  # type: ignore[return-value]
 
