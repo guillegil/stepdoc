@@ -1,0 +1,21 @@
+tests/t.py::test_dev
+Parameters:
+  level   1, 2
+Variant for: 1
+1. Set `dac` level
+   Note: The DAC settles in 1 ms.
+   1.1. dev.map.dac.level = 1
+   1.2. Read dev.map.adc.value
+2. Check
+   2.1. Verify adc == 4
+Variant for: 2
+1. Set `dac` level
+   Note: The DAC settles in 1 ms.
+   1.1. dev.map.dac.level = 2
+   1.2. Read dev.map.adc.value
+2. Check
+   2.1. Verify adc == 4
+
+tests/t.py::test_api
+1. Create <user> | *x*
+   1.1. /users  {'name': '<script>'}

@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
+from ..core.fmt import spans
 from .common import (
+    DOC_TITLE,
     OUTCOME_TEXT,
     STATUS_MARK,
+    Block,
     Line,
     Record,
     anchors,
+    case_doc,
+    doc_blocks,
+    procedure_doc,
     procedures,
     short_name,
     show,
@@ -34,6 +41,43 @@ _PROSE = str.maketrans({c: "\\" + c for c in "\\`*_[]<>|"})
 def _prose(text: str) -> str:
     """Plain words in Markdown: one line, characters that would format escaped."""
     return " ".join(text.split()).translate(_PROSE)
+
+
+def _words(text: str) -> str:
+    """Docstring prose: escaped like other prose, its `code` spans kept as code,
+    and nothing at the start of the paragraph that would make it a heading or a list."""
+    out = "".join(_code(t) if code else t.translate(_PROSE) for t, code in spans(" ".join(text.split())))
+    out = re.sub(r"^(\d+)([.)])(?=\s|$)", r"\1\\\2", out)
+    return "\\" + out if out[:1] in ("#", "+", "-", "=") else out
+
+
+def _md_block(block: Block) -> list[str]:
+    if block.kind == "p":
+        return [_words(block.items[0])]
+    if block.kind == "ul":
+        return [f"- {_words(item)}" for item in block.items]
+    return [f"{n}. {_words(item)}" for n, item in zip(block.numbers, block.items)]
+
+
+def _md_doc(doc: Optional[dict[str, str]]) -> list[str]:
+    """DOC-1: description, objective and acceptance criteria, each block followed
+    by a blank line."""
+    if not doc:
+        return []
+    out: list[str] = []
+    for block in doc_blocks(doc.get("description", "")):
+        out += _md_block(block) + [""]
+    for key in ("objective", "acceptance"):
+        if not doc.get(key):
+            continue
+        blocks = doc_blocks(doc[key])
+        if key == "objective" and len(blocks) == 1 and blocks[0].kind == "p":
+            out += [f"**{DOC_TITLE[key]}.** {_words(blocks[0].items[0])}", ""]
+            continue
+        out += [f"**{DOC_TITLE[key]}**", ""]
+        for block in blocks:
+            out += _md_block(block) + [""]
+    return out
 
 
 def _md_line(line: Line) -> str:
@@ -77,6 +121,7 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
             f"_{proc.procedure_id} · {n} case{'s' * (n != 1)}_",
             "",
         ]
+        out += _md_doc(procedure_doc(proc))
         rows = proc.param_table
         if rows:
             heading = "**Parameters**" + (f" (strategy {_code(proc.strategy)})" if proc.strategy else "")
@@ -129,6 +174,7 @@ def render_report(record: Record, title: str = "Test report") -> str:
         if t["seed"] is not None:
             meta.append(f"seed {show(t['seed'])}")
         out += [f"_{' · '.join(meta)}_", ""]
+        out += _md_doc(case_doc(t))
         if t["params"]:
             note = vector_note(t)
             line = "Parameters: " + ", ".join(_code(f"{k} = {show(v)}") for k, v in t["params"].items())

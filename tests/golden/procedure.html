@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test procedures</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --code-bg: #f6f8fa;
+  --pass: #1a7f37; --fail: #cf222e; --unknown: #9a6700; --step-bg: #f6f8fa;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+    "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --code-bg: #161b22;
+    --pass: #3fb950; --fail: #f85149; --unknown: #d29922; --step-bg: #161b22;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 28px; margin: 0 0 4px; }
+h2 { font-size: 20px; margin: 40px 0 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+h3 { font-size: 15px; margin: 20px 0 8px; }
+a { color: inherit; }
+.meta { color: var(--muted); font-size: 13px; margin: 0 0 12px; overflow-wrap: anywhere; }
+code, .code {
+  font: 13px/1.5 var(--mono); font-variant-ligatures: none;
+  background: var(--code-bg); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+table { border-collapse: collapse; margin: 8px 0 16px; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 13px; color: var(--muted); font-weight: 600; }
+nav ol { padding-left: 20px; margin: 8px 0; }
+.lines { margin: 8px 0 16px; }
+.line { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+.line.step { font-weight: 600; margin-top: 6px; padding: 4px 8px; background: var(--step-bg); border-radius: 6px; }
+.line.section { font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; color: var(--muted); margin-top: 12px; }
+.num { color: var(--muted); min-width: 3.5em; font-variant-numeric: tabular-nums; }
+.body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.result { color: var(--muted); }
+.note { color: var(--muted); font-size: 13px; font-weight: 400; }
+.remark { color: var(--muted); font-style: italic; white-space: pre-line; padding: 0 8px 4px 4.6em; }
+.mark { font-weight: 700; min-width: 1em; }
+.passed, .mark-pass { color: var(--pass); }
+.failed, .error, .mark-fail { color: var(--fail); }
+.unknown, .skipped, .mark-unknown { color: var(--unknown); }
+.badge { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; }
+@media print {
+  main { max-width: none; padding: 0; }
+  h2 { break-before: page; }
+  .line { break-inside: avoid; }
+}
+</style>
+</head>
+<body><main>
+<h1>Test procedures</h1>
+<p class="meta">stepdoc 0.0-golden · 2026-01-01T00:00:00+00:00</p>
+<nav><h3>Contents</h3><ol>
+<li><a href="#tests-t-py-test_dev">test_dev</a></li>
+<li><a href="#tests-t-py-test_api">test_api</a></li>
+</ol></nav>
+<h2 id="tests-t-py-test_dev">test_dev</h2>
+<p class="meta">tests/t.py::test_dev · 2 cases</p>
+<h3>Parameters</h3>
+<table><tr><th>Parameter</th><th>Values</th></tr><tr><td><code>level</code></td><td><code>1</code>, <code>2</code></td></tr></table>
+<h3>Procedure for <code>1</code></h3>
+<div class="lines"><div class="line step"><span class="num">1</span><span class="body">Set <code>dac</code> level</span></div><div class="remark">The DAC settles in 1 ms.</div><div class="line" style="margin-left:1.5em"><span class="num">1.1</span><span class="body"><code>dev.map.dac.level = 1</code> <span class="note">value from this run</span></span></div><div class="line" style="margin-left:1.5em"><span class="num">1.2</span><span class="body">Read <code>dev.map.adc.value</code></span></div><div class="line step"><span class="num">2</span><span class="body">Check</span></div><div class="line" style="margin-left:1.5em"><span class="num">2.1</span><span class="body">Verify <code class="expr">adc == 4</code></span></div></div>
+<h3>Procedure for <code>2</code></h3>
+<div class="lines"><div class="line step"><span class="num">1</span><span class="body">Set <code>dac</code> level</span></div><div class="remark">The DAC settles in 1 ms.</div><div class="line" style="margin-left:1.5em"><span class="num">1.1</span><span class="body"><code>dev.map.dac.level = 2</code> <span class="note">value from this run</span></span></div><div class="line" style="margin-left:1.5em"><span class="num">1.2</span><span class="body">Read <code>dev.map.adc.value</code></span></div><div class="line step"><span class="num">2</span><span class="body">Check</span></div><div class="line" style="margin-left:1.5em"><span class="num">2.1</span><span class="body">Verify <code class="expr">adc == 4</code></span></div></div>
+<h2 id="tests-t-py-test_api">test_api</h2>
+<p class="meta">tests/t.py::test_api · 1 case</p>
+<div class="lines"><div class="line step"><span class="num">1</span><span class="body">Create &lt;user&gt; | *x*</span></div><div class="line" style="margin-left:1.5em"><span class="num">1.1</span><span class="body"><code>/users  {&#x27;name&#x27;: &#x27;&lt;script&gt;&#x27;}</code> <span class="note">value from this run</span></span></div></div>
+</main></body>
+</html>

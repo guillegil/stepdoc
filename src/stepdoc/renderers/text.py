@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from .common import OUTCOME_TEXT, Record, procedure_lines, procedures, report_lines, vector_note
+from .common import (
+    OUTCOME_TEXT,
+    Record,
+    case_doc,
+    doc_text_lines,
+    procedure_doc,
+    procedure_lines,
+    procedures,
+    report_lines,
+    vector_note,
+)
 
 
 def render_procedure(record: Record) -> str:
     out: list[str] = []
     for proc in procedures(record):
         out.append(proc.procedure_id)
+        doc = procedure_doc(proc)
+        if doc:
+            out.extend(doc_text_lines(doc))
         rows = proc.param_table
         if rows:
             out.append("Parameters" + (f' (strategy "{proc.strategy}")' if proc.strategy else "") + ":")
@@ -36,6 +49,9 @@ def render_report(record: Record) -> str:
     for test in record["tests"]:
         verdict = "DRY-RUN" if test["dry_run"] else OUTCOME_TEXT.get(test["outcome"], test["status"].upper())
         out.append(f"{test['id']}   {verdict}")
+        doc = case_doc(test)
+        if doc:
+            out.extend(doc_text_lines(doc))
         if test["params"]:
             note = vector_note(test)
             out.append("  " + ", ".join(f"{k}={v!r}" for k, v in test["params"].items()) + (f" ({note})" if note else ""))
