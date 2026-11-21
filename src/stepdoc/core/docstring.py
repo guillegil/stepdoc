@@ -63,7 +63,9 @@ def parse_docstring(text: Optional[str]) -> Optional[dict[str, str]]:
     def close() -> None:
         body = _block(lines)
         head = first.pop(current, "")
-        joined = "\n".join(p for p in (head, body) if p)
+        # A blank line after ``Heading: text`` still ends that paragraph.
+        gap = "\n\n" if lines and not lines[0].strip() else "\n"
+        joined = gap.join(p for p in (head, body) if p)
         if joined:
             parts.setdefault(current, []).append(joined)
 

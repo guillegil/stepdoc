@@ -81,6 +81,21 @@ def test_inline_heading_text_with_continuation():
     assert doc == {"objective": "Show that\nthe FIFO fills."}
 
 
+def test_inline_heading_text_keeps_the_next_paragraph():
+    doc = parse_docstring("""Description: Only a description.
+
+    Second paragraph.
+
+    Objective: Show that the FIFO fills.
+
+        More about it.
+    """)
+    assert doc == {
+        "description": "Only a description.\n\nSecond paragraph.",
+        "objective": "Show that the FIFO fills.\n\nMore about it.",
+    }
+
+
 @pytest.mark.parametrize("heading, key", [
     ("OBJECTIVE:", "objective"),
     ("objectives:", "objective"),
