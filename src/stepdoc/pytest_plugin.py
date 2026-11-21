@@ -14,7 +14,7 @@ import sys
 import tokenize
 from pathlib import Path
 from types import FrameType
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Iterable, Optional
 
 import pytest
 
@@ -22,13 +22,17 @@ from . import adapters as _adapters
 from .core.docstring import parse_docstring
 from .core.model import Check, Location, Section, Step
 from .core.record import case_record, dumps, run_record
-from .core.recorder import Recorder, current_recorder, is_dry_run
+from .core.recorder import Recorder, _perf, _renumber, current_recorder, is_dry_run
 from .core.symbolic import set_skip_modules
 from .renderers import format_for_path, render
 
 _state_key = pytest.StashKey["_State"]()
 _recorder_key = pytest.StashKey[Recorder]()
 _outcome_key = pytest.StashKey[str]()
+_ran_key = pytest.StashKey["set[int]"]()
+"""ids of the fixture definitions that ran (were not reused) for the test so far."""
+_told_key = pytest.StashKey["set[int]"]()
+"""ids of the pre-conditions already listed as established in this attempt."""
 
 
 class _State:
@@ -48,6 +52,12 @@ class _State:
         self.order: dict[str, int] = {}  # test id -> collection index
         self.adapters: list[_adapters.Adapter] = []
         self.unseen_judges: list[_adapters.Adapter] = []  # judging tools whose adapter is off (NFR-7)
+        # PRE-3: pre-conditions by the fixtures that were running when they were applied.
+        self.running: list[Any] = []  # fixture definitions being set up, outermost first
+        self.applied: dict[int, tuple[Any, list[tuple[str, Step]]]] = {}
+        """id(fixture definition) -> the definition (kept alive, so the id stays
+        its own) and the pre-conditions its last run applied, each with the id of
+        the test it ran for."""
 
 
 _WORKER_KEY = "stepdoc_cases"
@@ -153,6 +163,9 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
     item.stash[_recorder_key] = rec
 
     def notify(event: str, s: Step) -> None:
+        if event == "finished" and s.section == "precondition" and "." not in s.number and s.applied_in is None:
+            for fixturedef in state.running:
+                state.applied[id(fixturedef)][1].append((item.nodeid, s))
         hook = item.ihook.pytest_stepdoc_step_started if event == "started" else item.ihook.pytest_stepdoc_step_finished
         hook(item=item, step=s)
 
@@ -196,10 +209,132 @@ def _in_section(item: pytest.Item, section: Section) -> None:
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
     _in_section(item, "setup")
+    item.stash[_ran_key] = set()
+    item.stash[_told_key] = set()
+    raised: Optional[BaseException] = None
+    try:
+        return (yield)
+    except BaseException as exc:
+        raised = exc
+        raise
+    finally:
+        _in_section(item, "procedure")
+        _established(item, raised)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
     try:
         return (yield)
     finally:
-        _in_section(item, "procedure")
+        # A shared fixture the test body asked for (request.getfixturevalue).
+        _established(item, None)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_fixture_setup(fixturedef: Any, request: Any) -> Generator[None, Any, Any]:
+    """PRE-3: remember which fixture applies which pre-conditions. pytest calls
+    this only when a fixture really runs, not when its cached value is reused."""
+    state: Optional[_State] = request.config.stash.get(_state_key, None)
+    if state is None or not state.active:
+        return (yield)
+    state.applied[id(fixturedef)] = (fixturedef, [])
+    item = getattr(request, "_pyfuncitem", None) or getattr(request, "node", None)
+    stash = getattr(item, "stash", None)
+    if stash is not None:
+        stash.setdefault(_ran_key, set()).add(id(fixturedef))
+    state.running.append(fixturedef)
+    try:
+        return (yield)
+    finally:
+        state.running.remove(fixturedef)
+
+
+def _fixturedefs(item: pytest.Item, state: _State, raised: Optional[BaseException]) -> Iterable[Any]:
+    """The fixture definitions this run of ``item`` really reached: the ones its
+    request resolved (with the definitions they override, when they ask for their
+    own name), and the one whose cached error ended the setup (pytest raises a
+    failed shared fixture's error again without listing it). A test skipped or
+    failed before a fixture was reached does not use it."""
+    request = getattr(item, "_request", None)
+    resolved = getattr(request, "_fixture_defs", None)
+    if isinstance(resolved, dict):
+        info = getattr(item, "_fixtureinfo", None)
+        by_name = getattr(info, "name2fixturedefs", None) or {}
+        for name, fixturedef in list(resolved.items()):
+            yield fixturedef
+            for overridden in reversed(by_name.get(name) or ()):
+                yield overridden
+                if name not in getattr(overridden, "argnames", ()):
+                    break
+    if raised is None:
+        return
+    for fixturedef, _ in list(state.applied.values()):
+        cached = getattr(fixturedef, "cached_result", None)
+        error = cached[2] if cached is not None else None
+        if isinstance(error, tuple) and any(part is raised for part in error):
+            yield fixturedef
+
+
+def _established(item: pytest.Item, raised: Optional[BaseException]) -> None:
+    """PRE-3: a test that uses a fixture whose pre-conditions an earlier test
+    applied (a session, module or class fixture, not run again) lists them as
+    already established: before its own, in the order they were applied."""
+    rec = item.stash.get(_recorder_key, None)
+    if rec is None:
+        return
+    state: _State = item.config.stash[_state_key]
+    ran = item.stash.get(_ran_key, set())
+    told = item.stash.setdefault(_told_key, set())
+    found: dict[int, tuple[str, Step]] = {}
+    for fixturedef in _fixturedefs(item, state, raised):
+        if id(fixturedef) in ran or getattr(fixturedef, "cached_result", None) is None:
+            continue
+        entry = state.applied.get(id(fixturedef))
+        if entry is None or entry[0] is not fixturedef:
+            continue
+        for test_id, original in entry[1]:
+            if id(original) not in told:
+                found.setdefault(id(original), (test_id, original))
+    if not found:
+        return
+    told.update(found)
+    present = {id(s.origin or s): s for s in rec.steps if s.section == "precondition"}
+    refs: list[Step] = []
+    again: list[Step] = []
+    now = _perf()
+    for test_id, original in sorted(found.values(), key=lambda pair: pair[1].started):
+        ref = Step(
+            number="",
+            title=original.title,
+            section="precondition",
+            status=original.status,
+            started=now,
+            ended=now,
+            error=original.error,
+            location=original.location,
+            note=original.note,
+            applied_in=test_id,
+            origin=original,
+        )
+        (again if id(original) in present else refs).append(ref)
+    if refs:
+        # Only the references move to the front: the test's own steps stay in the
+        # order they ran, which adapters that place late checks rely on.
+        lead = next((i for i, s in enumerate(rec.steps) if s.applied_in is None), len(rec.steps))
+        rec.steps[lead:lead] = refs
+        for n, s in enumerate((s for s in rec.steps if s.section == "precondition"), 1):
+            if s.number != f"P{n}":
+                s.number = f"P{n}"
+                _renumber(s)
+    # A rerun of the test (pytest-reporter's retries run inside one recorder): the
+    # record lists the pre-condition already, but plugins that follow each attempt
+    # are told again.
+    for ref in again:
+        ref.number = present[id(ref.origin)].number
+    for ref in [*refs, *again]:
+        rec._notify("started", ref)
+        rec._notify("finished", ref)
 
 
 @pytest.hookimpl(wrapper=True)

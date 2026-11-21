@@ -152,6 +152,7 @@ def _step(s: Step, ctx: _Ctx) -> dict[str, Any]:
         "location": ctx.loc(s.location),
         **({} if s.note is None else {"note": s.note}),
         **({} if s.loop is None else {"loop": _loop(s.loop, ctx)}),
+        **({} if s.applied_in is None else {"applied_in": s.applied_in}),
         "entries": [_entry(e, ctx) for e in s.entries],
     }
 

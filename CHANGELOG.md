@@ -21,6 +21,40 @@
   `objective`, `acceptance`, only those with text, each the section's text as
   written). The `pytest_stepdoc_test_doc(item, doc)` hook gives other plugins the
   same dict once per test, before it runs.
+- Pre-conditions: `stepdoc.precondition("System Mode A")`, a context manager
+  and a decorator (PRE-1). A pre-condition is a named state the system must be
+  in before the test, apart from the rest of the setup. What is recorded inside
+  (actions, checks, steps) goes into a **Pre-conditions** section before Setup,
+  numbered `P1`, `P1.1`…, in the procedure and the report (text, Markdown and
+  HTML), whichever phase the block ran in. Like a step it gets a status, takes
+  `note=`, and an exception is attached to it and raised again. A block written
+  inside a setup or procedure step is not part of that step: it is the next
+  pre-condition and the step goes on after it (PRE-2); only a pre-condition
+  inside another one is nested. As a decorator it wraps the whole function; on
+  a generator function (a fixture that yields, with `@pytest.fixture` above
+  `@stepdoc.precondition(...)`) only the part before the first `yield`, so what
+  runs after it is ordinary teardown. Coroutine functions and async generators
+  are wrapped too. pytest-verifier checks made inside a pre-condition are
+  placed in it (those a fixture makes after its `yield` stay in Teardown). A
+  `record=False` step around a pre-condition does not hide its actions.
+  `@stepdoc.precondition(...)` written above `@pytest.fixture` raises a
+  `TypeError` that says to swap them.
+- Pre-conditions already established (PRE-3). A test that uses a session,
+  module or class fixture which applied a pre-condition for an earlier test
+  lists it too, before its own, without entries: `P1. System Mode A   already
+  established, applied in test_bus.py::test_send`, in the report with the
+  status it got there, or `not established, failed in …` when it failed
+  there. This covers a fixture reached through another fixture, through an
+  override that asks for the fixture it overrides, and through
+  `request.getfixturevalue` in the test; a test skipped before its fixtures
+  were set up lists none. A parametrized test's procedure shows the pre-condition
+  in full when one of its cases applied it. The
+  `pytest_stepdoc_step_started`/`finished` hooks are called for these lines as
+  well.
+- Run record (schema 0.5): a step's `section` may be
+  `precondition`, and a pre-condition the test did not apply itself has
+  `applied_in` (the id of the test that applied it) and no entries.
+  `Step.applied_in` carries it to plugins that follow steps.
 - `verify.all_satisfy` reads as one line (CHK-11). pytest-verifier makes one
   check per item, which used to be one line per item (twelve times `Verify
   'Index error': w & INDEX_ERROR_BIT == 0`). When every item's check reads the
@@ -141,6 +175,9 @@
   with 0.1 to 0.3 still render.
 
 ### Changed
+- Markdown: the note after a line (a step's error, `value from this run`, the
+  test that applied a pre-condition) is escaped, so `_`, `*`, `[`, `<` in an
+  error message or a test id read as typed instead of formatting the line.
 - A pytest-verifier check with a name and a non-literal checked value now reads
   `'Stored age': user["age"] == <age>` instead of `'Stored age' == <age>`.
 - Placing pytest-verifier's checks after a phase no longer grows with the square

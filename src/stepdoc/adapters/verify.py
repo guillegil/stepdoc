@@ -512,7 +512,14 @@ class _Placer:
         self.rec = rec
         self.root = root
         self.paths: list[tuple[Step, ...]] = []
-        self._walk(rec.steps, ())
+        """For each step, the steps that were open around it, outermost first. A
+        pre-condition written inside a step (PRE-2: recorded at the top level) is
+        listed under that step, because its lines are inside that step's block."""
+        self.hoisted: dict[int, list[Step]] = {}
+        for s in rec.steps:
+            if s.within is not None:
+                self.hoisted.setdefault(id(s.within), []).append(s)
+        self._walk([s for s in rec.steps if s.within is None], ())
         self.at: dict[int, int] = {id(p[-1]): i for i, p in enumerate(self.paths)}
         self.spans: dict[int, Optional[tuple[str, int, int]]] = {}
         self.cursor = -1
@@ -528,7 +535,16 @@ class _Placer:
         for s in steps:
             path = parent + (s,)
             self.paths.append(path)
-            self._walk(s.children, path)
+            inner = s.children
+            if id(s) in self.hoisted:
+                inner = sorted([*inner, *self.hoisted[id(s)]], key=lambda c: c.started)
+            self._walk(inner, path)
+
+    @staticmethod
+    def _recorded(path: tuple[Step, ...]) -> tuple[Step, ...]:
+        """``path`` as the record has it: from its last top-level step down."""
+        cut = max((j for j, s in enumerate(path) if s.within is not None), default=0)
+        return path[cut:]
 
     def _contains(self, i: int, anchors: list[tuple[str, int]]) -> bool:
         if i not in self.spans:
@@ -561,7 +577,16 @@ class _Placer:
         best: Optional[int] = None
         for i in self._candidates():
             path = self.paths[i]
-            if path[-1].section != section or not self._contains(i, lines):
+            last = path[-1]
+            if last.section == "precondition":
+                # A pre-condition runs in any phase, but only the checks of the phase it
+                # was open in are its own: not what a yield fixture does after its
+                # yield, and never those of a later test (a PRE-3 reference).
+                if last.applied_in is not None or last.opened_in != section:
+                    continue
+            elif last.section != section:
+                continue
+            if not self._contains(i, lines):
                 continue
             if best is not None and self.paths[best] != path[: len(self.paths[best])]:
                 # Not nested in the match so far: a later run of the same step.
@@ -589,7 +614,7 @@ class _Placer:
             self.cursor = best
             if anchors:
                 self.seen.setdefault(best, set()).add((anchors[0].file, anchors[0].line))
-            path = self.paths[best]
+            path = self._recorded(self.paths[best])
             entries = path[-1].entries
             if wording is not None and fold is None:
                 index = start  # the next pass of a polled read: right after the last

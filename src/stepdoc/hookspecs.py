@@ -15,7 +15,16 @@ import pytest
 @pytest.hookspec
 def pytest_stepdoc_step_started(item: pytest.Item, step: Any) -> None:
     """A step started in ``item``. ``step`` is a ``stepdoc.Step``: its ``number``,
-    ``title``, ``section`` and ``location`` are set; its entries are still empty."""
+    ``title``, ``section`` and ``location`` are set; its entries are still empty.
+
+    Pre-conditions (``section == "precondition"``): at the end of the test's setup
+    (and of its call, for a fixture the test body asked for) stepdoc also
+    announces, with both hooks in a row, each pre-condition a shared fixture
+    applied for an earlier test (``step.applied_in`` is that test's id; the step
+    has no entries). They come first in the section, so the ``number`` of the
+    pre-conditions announced before them for this test, and of their entries,
+    changes then (``P1`` becomes ``P2``): read numbers when the test ends, or
+    number the section yourself, references first."""
 
 
 @pytest.hookspec

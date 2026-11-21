@@ -241,6 +241,8 @@ def render_procedure(record: Record, title: str = "Test procedures") -> str:
         body.append(f'<p class="meta">{escape(proc.procedure_id)} · {n} case{"s" * (n != 1)}</p>')
         body += _doc(procedure_doc(proc))
         body += _params_table(proc)
+        if proc.precondition is not None:
+            body.append(_lines(test_lines(proc.precondition, symbolic=True, sections=("precondition",))))
         if proc.setup is not None:
             body.append(_lines(test_lines(proc.setup, symbolic=True, sections=("setup",))))
         only = ("procedure",)

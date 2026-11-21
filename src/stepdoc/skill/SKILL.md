@@ -79,6 +79,13 @@ Rules that keep the procedure readable:
             2. No write is lost or reported as an error.
         """
     ```
+11. **Name a shared starting state with `stepdoc.precondition("System Mode A")`.**
+    Use it for a state with a name of its own that tests start from (an operating
+    mode, a calibrated bench), not for every fixture: plain fixture steps belong
+    in Setup. Decorate the fixture that establishes it, `@pytest.fixture` on top;
+    use `with stepdoc.precondition("…"):` in a test or helper. It documents as
+    `P1`, `P1.1`… under **Pre-conditions**. See
+    [references/preconditions.md](references/preconditions.md).
 
 ## Bridges: where actions come from
 
@@ -150,6 +157,8 @@ The file extension picks the format: `.md`, `.html` or `.txt`.
 - no line says "value from this run" (the source was not found: check
   `stepdoc_skip_modules` or the bridge's `value_from`);
 - nothing important is in "Unscoped";
+- a named starting state is under "Pre-conditions", once per test, and tests
+  that share its fixture say "already established, applied in …";
 - polling shows as one "Poll …" line, and a loop as one "Repeat" entry, not
   dozens of lines.
 
