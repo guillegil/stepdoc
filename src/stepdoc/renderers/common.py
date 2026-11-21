@@ -435,19 +435,27 @@ class Block:
 
 
 def doc_blocks(text: str) -> list[Block]:
-    """Paragraphs and lists of one docstring section (``parse_docstring``). Lines
-    of a paragraph, and lines under a list item (indented, or right after it), are
-    joined by a space; a blank line ends a paragraph, not a list."""
+    """Paragraphs and lists of one docstring section (``parse_docstring``).
+
+    A line starting with ``-``, ``*``, ``1.`` or ``1)`` is a list item, indented
+    or not (a nested list's items join the list). Lines of a paragraph, and lines
+    under a list item (indented past its marker, or right after it and not left
+    of it), are joined by a space; a blank line ends a paragraph, not a list. As
+    in CommonMark, a numbered line right after paragraph text starts a list only
+    at 1 (``... reaches\n512. Then`` is one paragraph)."""
     blocks: list[Block] = []
-    open_item = False  # the last line belongs to a list item
+    marker = -1  # indent of the open list item's marker; -1: no open item
     gap = False  # a blank line since the last text
     for line in text.split("\n"):
-        if not line.strip():
+        body = line.lstrip()
+        if not body:
             gap = True
             continue
-        indented = line[:1].isspace()
-        bullet, number = _BULLET.fullmatch(line), _NUMBER.fullmatch(line)
+        indent = len(line) - len(body)
+        bullet, number = _BULLET.fullmatch(body), _NUMBER.fullmatch(body)
         last = blocks[-1] if blocks else None
+        if number and last is not None and last.kind == "p" and not gap and int(number.group(1)) != 1:
+            number = None
         if bullet or number:
             kind, item = ("ul", bullet.group(2)) if bullet else ("ol", number.group(3))  # type: ignore[union-attr]
             if last is None or last.kind != kind:
@@ -456,14 +464,15 @@ def doc_blocks(text: str) -> list[Block]:
             last.items.append(item.strip())
             if number:
                 last.numbers.append(int(number.group(1)))
-            open_item = True
+            marker = indent
         elif last is not None and (
-            (last.kind != "p" and open_item and (indented or not gap)) or (last.kind == "p" and not gap)
+            (marker >= 0 and (indent > marker or (not gap and indent >= marker)))
+            or (last.kind == "p" and not gap)
         ):
-            last.items[-1] += " " + line.strip()
+            last.items[-1] += " " + body
         else:
-            blocks.append(Block("p", [line.strip()], []))
-            open_item = False
+            blocks.append(Block("p", [body], []))
+            marker = -1
         gap = False
     return blocks
 

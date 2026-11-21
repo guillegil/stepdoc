@@ -186,6 +186,55 @@ def test_blocks_sentence():
     assert doc_blocks("The flag sets after\n500 writes.") == [Block("p", ["The flag sets after 500 writes."], [])]
 
 
+@pytest.mark.parametrize("gap", ["", "\n"])
+def test_blocks_indented_list_after_an_intro(gap):
+    assert doc_blocks(f"The test passes when:\n{gap}    1. a\n    2. b") == [
+        Block("p", ["The test passes when:"], []),
+        Block("ol", ["a", "b"], [1, 2]),
+    ]
+
+
+def test_blocks_right_aligned_numbers():
+    assert doc_blocks(" 9. nine\n10. ten") == [Block("ol", ["nine", "ten"], [9, 10])]
+
+
+def test_blocks_nested_items_stay_items():
+    assert doc_blocks("- a\n    - sub\n      more\n- b") == [Block("ul", ["a", "sub more", "b"], [])]
+
+
+def test_blocks_wrapped_number_continues_a_paragraph():
+    assert doc_blocks("Write words until the count reaches\n512. Then read the flag.") == [
+        Block("p", ["Write words until the count reaches 512. Then read the flag."], [])
+    ]
+
+
+@pytest.mark.parametrize("after", ["\n\nAll of them must hold.", "\nNotes:\n    something else"])
+def test_list_followed_by_section_prose(after):
+    doc = parse_docstring(
+        "S.\n\n    Acceptance criteria:\n        - first\n        - second\n          continues here"
+        + after.replace("\n", "\n    ")
+    )
+    prose = "All of them must hold." if "All" in after else "Notes: something else"
+    assert doc_blocks(doc["acceptance"]) == [
+        Block("ul", ["first", "second continues here"], []),
+        Block("p", [prose], []),
+    ]
+    md = render(documented_run(doc), "procedure", "md")
+    assert f"**Acceptance criteria**\n\n- first\n- second continues here\n\n{prose}\n" in md
+    page = render(documented_run(doc), "procedure", "html")
+    assert f"<ul><li>first</li><li>second continues here</li></ul><p>{prose}</p>" in page
+    text = render(documented_run(doc), "procedure", "text")
+    assert f"    - first\n    - second continues here\n    {prose}\n" in text
+
+
+def test_markdown_escapes_a_leading_number():
+    from stepdoc.renderers.markdown import _words
+
+    assert _words("1. a 2. b") == "1\\. a 2. b"
+    assert _words("3) c") == "3\\) c"
+    assert _words("12 items") == "12 items"
+
+
 # --------------------------------------------------------------------------- #
 # Record and hook
 # --------------------------------------------------------------------------- #

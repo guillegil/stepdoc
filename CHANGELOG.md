@@ -10,8 +10,10 @@
   `Objective:` (`**Objective.** text` when it is one paragraph) and `Acceptance
   criteria:` (also `Objectives`, `Pass criteria`, `Pass/Fail criteria`,
   `Acceptance/Pass criteria`, `criterion`; any case; text may follow the colon).
-  A sentence stays a paragraph, `-`/`*` and `1.`/`1)` lines become lists (the
-  author's numbers kept, indented lines joined to the item above), backticks show
+  A sentence stays a paragraph, `-`/`*` and `1.`/`1)` lines become lists, also
+  when indented under an intro line or nested (the author's numbers kept,
+  indented lines joined to the item above; a wrapped line starting with a number
+  other than 1 stays in its paragraph), backticks show
   as code. Other lines ending in `:` stay text; a `Description:` heading is
   accepted. Class and module docstrings are not read, and a test without a
   docstring renders as before (HTML adds its `.doc` styles only to pages that

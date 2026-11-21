@@ -47,6 +47,7 @@ def _words(text: str) -> str:
     """Docstring prose: escaped like other prose, its `code` spans kept as code,
     and nothing at the start of the paragraph that would make it a heading or a list."""
     out = "".join(_code(t) if code else t.translate(_PROSE) for t, code in spans(" ".join(text.split())))
+    out = re.sub(r"^(\d+)([.)])(?=\s|$)", r"\1\\\2", out)
     return "\\" + out if out[:1] in ("#", "+", "-", "=") else out
 
 
