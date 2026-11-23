@@ -522,6 +522,7 @@ class _Placer:
         self._walk([s for s in rec.steps if s.within is None], ())
         self.at: dict[int, int] = {id(p[-1]): i for i, p in enumerate(self.paths)}
         self.spans: dict[int, Optional[tuple[str, int, int]]] = {}
+        self.bound: dict[int, tuple[list[Any], dict[str, set[tuple[str, str]]]]] = {}
         self.cursor = -1
         self.seen: dict[int, set[tuple[str, int]]] = {}
         self.next_index: dict[int, int] = {}
@@ -668,9 +669,25 @@ class _Placer:
                     wording.apply(check, *found)
                     return
         if subject.name is not None:
-            bound = {_targets(a) for a in _reads(entries) if a.bound_to == subject.name}
+            bound = self._bound(entries).get(subject.name, ())
             if len(bound) == 1:
-                wording.apply(check, *bound.pop())
+                wording.apply(check, *next(iter(bound)))
+
+    def _bound(self, entries: list[Any]) -> dict[str, set[tuple[str, str]]]:
+        """The targets of the reads among ``entries`` (see :func:`_reads`), by the
+        variable each was bound to. Placing a check only moves reads within the
+        entries it goes to (into the check's ``reads``), so the answer holds for
+        the whole batch: one scan per step, not one per check (a step that makes
+        thousands of checks would otherwise rescan them all for each one)."""
+        held = self.bound.get(id(entries))
+        if held is not None and held[0] is entries:
+            return held[1]
+        found: dict[str, set[tuple[str, str]]] = {}
+        for a in _reads(entries):
+            if a.bound_to is not None:
+                found.setdefault(a.bound_to, set()).add(_targets(a))
+        self.bound[id(entries)] = (entries, found)
+        return found
 
     def _index(
         self, i: int, s: Step, anchors: list[Location], span: Optional[tuple[int, int]] = None
