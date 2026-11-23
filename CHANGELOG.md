@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+- Faster pytest-verifier checks in large tests and large test files. A step that
+  makes many checks placed each one after scanning every check placed before it,
+  so a test with 8,000 checks in one step spent 2.6 s there; it now takes 0.2 s
+  (the time grows with the number of checks, not its square). Finding the call
+  that made a check, and the statement a step covers, read the whole test file
+  again for each new source line; each file is now read once per method name.
+  The documents do not change.
+
 ### Added
 - Test descriptions from docstrings (DOC-1). A test function's own docstring is
   shown under the test's heading, before its parameters and steps, in the

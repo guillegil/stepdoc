@@ -42,17 +42,31 @@ def statement_span(path: str, line: int) -> tuple[int, int]:
     """Lines covered by the statement starting at ``line``: a whole ``with`` block
     for ``with step(...)``, the call itself for a decorated step's call. Falls
     back to the single line when the source cannot be read."""
+    end = _statement_ends(path).get(line)
+    if end is None:
+        return line, line
+    return end
+
+
+@lru_cache(maxsize=256)
+def _statement_ends(path: str) -> dict[int, tuple[int, int]]:
+    """For each line a statement starts on (its own line, or its first
+    decorator's), the span of the longest such statement: one walk of the file
+    for every :func:`statement_span` lookup in it."""
     tree = _tree(path)
     if tree is None:
-        return line, line
-    best: Optional[ast.stmt] = None
+        return {}
+    best: dict[int, ast.stmt] = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.stmt) and line in (node.lineno, _first_line(node)):
-            if best is None or (node.end_lineno or line) > (best.end_lineno or line):
-                best = node
-    if best is None:
-        return line, line
-    return min(best.lineno, line), best.end_lineno or line
+        if not isinstance(node, ast.stmt):
+            continue
+        for line in {node.lineno, _first_line(node)}:
+            held = best.get(line)
+            if held is None or (node.end_lineno or line) > (held.end_lineno or line):
+                best[line] = node
+    return {
+        line: (min(node.lineno, line), node.end_lineno or line) for line, node in best.items()
+    }
 
 
 def _first_line(node: ast.stmt) -> int:
@@ -68,23 +82,34 @@ def calls_at(path: str, line: int, method: str) -> tuple[ast.Call, ...]:
     ``line`` and are not inside another such call, in source order: one per
     check made on the line (``verify.equal(a.equal(b), True)`` gives the outer
     call only; two checks on one line give two calls)."""
+    found = [
+        (call, span)
+        for call, span in _calls_named(path, method)
+        if span[0] <= line <= span[2]
+    ]
+    outer = [
+        (c, span) for c, span in found
+        if not any(o is not c and _within(span, o_span) for o, o_span in found)
+    ]
+    return tuple(c for c, _ in sorted(outer, key=lambda pair: pair[1]))
+
+
+@lru_cache(maxsize=1024)
+def _calls_named(path: str, method: str) -> tuple[tuple[ast.Call, tuple[int, int, int, int]], ...]:
+    """Every call of ``method`` in the file with its extent: one walk of the file
+    per method name, however many lines are looked up in it."""
     tree = _tree(path)
     if tree is None:
         return ()
-    found: list[ast.Call] = []
+    found = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name == method and node.lineno <= line <= (node.end_lineno or node.lineno):
-            found.append(node)
-    spans = {id(c): _extent(c) for c in found}
-    outer = [
-        c for c in found
-        if not any(o is not c and _within(spans[id(c)], spans[id(o)]) for o in found)
-    ]
-    return tuple(sorted(outer, key=lambda c: spans[id(c)]))
+        if name == method:
+            found.append((node, _extent(node)))
+    return tuple(found)
 
 
 def _extent(node: ast.expr) -> tuple[int, int, int, int]:
