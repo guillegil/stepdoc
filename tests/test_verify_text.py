@@ -967,3 +967,40 @@ def test_recorder_notes_for_asserts_and_the_switch():
     record = run_record([case_record(rec)])
     jsonschema.validate(record, SCHEMA)
     assert "(one is not two)" in render(record, "procedure", "text")
+
+
+def test_constants_show_their_value_in_the_procedure(project):
+    """SYM-9: a module constant is the same in every run, so the procedure shows
+    its value; a parameter or a local keeps its ``<name>``."""
+    project.makepyfile(
+        limits="MAX_TX = 8\n",
+        test_consts='''
+        import pytest
+        import limits
+        from limits import MAX_TX
+        from stepdoc import step
+
+        MY_CONST = 1
+
+
+        @pytest.mark.parametrize("channel", [3])
+        def test_consts(verify, tb, channel):
+            dat = getattr(tb.dev.block, f"esmi{channel}_32dat")
+            expected = 1
+            with step("Verify"):
+                verify.equal(dat.txfe, MY_CONST)
+                verify.equal(dat.tx8e, expected)
+                verify.between(dat.txfe, MY_CONST - 1, limits.MAX_TX)
+                verify.between(dat.tx8e, channel - 3, MAX_TX)
+        ''',
+    )
+    run(project).assert_outcomes(passed=1)
+    assert numbered(lines(project, "procedure.txt")) == [
+        "1. Verify",
+        "   1.1. Verify dev.block.esmi<channel>_32dat.txfe == 1",
+        "   1.2. Verify dev.block.esmi<channel>_32dat.tx8e == <expected>",
+        "   1.3. Verify dev.block.esmi<channel>_32dat.txfe ∈ [0, 8]",
+        "   1.4. Verify dev.block.esmi<channel>_32dat.tx8e ∈ [<channel - 3>, 8]",
+    ]
+    report = lines(project, "report.txt")
+    assert "   1.1. Verify dev.block.esmi3_32dat.txfe == 1 -> got 1   ✓" in report

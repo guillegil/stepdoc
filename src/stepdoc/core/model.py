@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
 
-from .symbolic import Resolution, Site, apply_target_pattern
+from .symbolic import Resolution, Site, apply_target_pattern, constant_text
 
 Status = Literal["passed", "failed", "error", "not_run", "unknown"]
 Direction = Literal["in", "out", "exchange"]
@@ -101,11 +101,17 @@ class Action:
             if sym is not None:
                 self.expr = None if sym.literal else sym.source
                 self.symbolic_value = sym.text
+                if sym.constant:
+                    self.symbolic_value = constant_text(sym, self.value) or sym.text
         if self.target_template is not None:
             parts: dict[str, str] = {}
             for name in self.target_fields:
                 fsym = res.select_value((name,))
-                parts[name] = fsym.raw if fsym is not None else str(self.meta.get(name))
+                if fsym is not None and fsym.constant and name in self.meta:
+                    shown = constant_text(fsym, self.meta[name], raw=True)
+                    parts[name] = fsym.raw if shown is None else shown
+                else:
+                    parts[name] = fsym.raw if fsym is not None else str(self.meta.get(name))
             for k, v in self.meta.items():
                 parts.setdefault(k, str(v))
             self.symbolic_target = self.target_template.format(**parts)

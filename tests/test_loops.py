@@ -27,7 +27,7 @@ def test_for_loop_of_one_write_is_one_line(dev, rec):
     with step("Empty FIFO"):
         for _ in range(16):
             dev.map.ctrl.mode = READ_FIFO
-    assert procedure(rec) == ["1. Empty FIFO", "   1.1. Repeat dev.map.ctrl.mode = <READ_FIFO>"]
+    assert procedure(rec) == ["1. Empty FIFO", "   1.1. Repeat dev.map.ctrl.mode = 1"]
     assert "   1.1. Repeat dev.map.ctrl.mode = 1 -> (16 times, " in report(rec)
 
 
@@ -41,7 +41,7 @@ def test_while_loop_collapses_by_pass(dev, rec):
         "1. Empty FIFO",
         "   1.1. Repeat",
         "      1.1.1. Read dev.map.status.pll_locked",
-        "      1.1.2. dev.map.ctrl.mode = <READ_FIFO>",
+        "      1.1.2. dev.map.ctrl.mode = 1",
         "      1.1.3. Read dev.map.adc.value",
         # The loop's last test of its condition, which ended it.
         "   1.2. Read dev.map.status.pll_locked",
@@ -71,7 +71,7 @@ def test_repeat_block_names_the_loop_and_absorbs_the_last_condition_test(dev, re
         "   1.1. dev.map.ctrl.enable = 1",
         "   1.2. Repeat until FIFO is empty",
         "      1.2.1. Read dev.map.status.pll_locked",
-        "      1.2.2. dev.map.ctrl.mode = <READ_FIFO>",
+        "      1.2.2. dev.map.ctrl.mode = 1",
         "      1.2.3. Read dev.map.adc.value",
         "   1.3. dev.map.ctrl.enable = 0",
     ]
