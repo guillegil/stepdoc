@@ -1,4 +1,4 @@
-"""Symbolic value resolution (SYM-1…3, 5, 6, 7).
+"""Symbolic value resolution (SYM-1…3, 5, 6, 7, 9).
 
 Two phases, so the hot path stays cheap:
 
@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterator, Optional, Sequence, TypeVar, Union
 
 import executing
 
-from .redaction import MASK, is_secret_key
+from .redaction import MASK, is_secret_key, redact_text
 
 __all__ = [
     "Site",
@@ -34,6 +34,9 @@ __all__ = [
     "skip_modules",
     "clear_caches",
     "assert_source",
+    "is_constant",
+    "secret_name",
+    "constant_text",
 ]
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -191,6 +194,9 @@ class Sym:
     source: str
     """Plain source of the expression: ``width``."""
     literal: bool
+    constant: bool = False
+    """A named constant (``MY_CONST``, ``consts.LIMIT``, ``MY_CONST + 1``): it is
+    the same in every run, so the procedure shows its value (SYM-9)."""
 
 
 @dataclass
@@ -586,7 +592,8 @@ def render(node: ast.expr) -> Sym:
     """Literals stay literal, everything else becomes ``<expr>``; containers and
     f-strings are rendered part by part."""
     text, raw, literal = _render(node)
-    return Sym(text=text, raw=raw, source=_unparse(node), literal=literal)
+    constant = not literal and is_constant(node)
+    return Sym(text=text, raw=raw, source=_unparse(node), literal=literal, constant=constant)
 
 
 def _render(node: ast.expr) -> tuple[str, str, bool]:
@@ -657,6 +664,134 @@ def _value_call_name(node: ast.expr) -> Optional[str]:
     if named and isinstance(first, ast.Constant) and isinstance(first.value, str):
         return first.value
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Named constants (SYM-9)
+# --------------------------------------------------------------------------- #
+
+_CONSTANT_NAME = re.compile(r"_*[A-Z][A-Z0-9_]*\Z")
+_SECRET_WORDS = ("password", "passwd", "secret", "token", "apikey", "api_key", "credential")
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def secret_name(source: str) -> bool:
+    """Whether a constant's name says it holds a secret (``API_TOKEN``): its value
+    is then not written into the procedure (ACT-9)."""
+    low = source.lower()
+    return any(w in low for w in _SECRET_WORDS)
+
+
+def is_constant(node: ast.expr) -> bool:
+    """Whether ``node`` is a named constant: an upper-case name (``MY_CONST``) or
+    attribute (``consts.LIMIT``, ``Mode.FAST``, ``consts.cfg.MAX``) whose root no
+    enclosing function binds (it comes from the module or an import, never a
+    parameter, fixture or local variable), or arithmetic of such constants and
+    number literals (``MY_CONST + 1``). Needs the parent links of executing's
+    tree to see the enclosing functions; ``False`` without them. Never raises."""
+    try:
+        return _constant(node, True)
+    except Exception:  # pragma: no cover - defensive: never break recording
+        return False
+
+
+def _constant(node: ast.expr, top: bool) -> bool:
+    if isinstance(node, ast.BinOp):
+        left, right = _constant(node.left, False), _constant(node.right, False)
+        return left and right and (_named(node.left) or _named(node.right))
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        return _constant(node.operand, False) and _named(node.operand)
+    if isinstance(node, ast.Constant):
+        return not top and isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    if isinstance(node, ast.Attribute):
+        if not _CONSTANT_NAME.match(node.attr):
+            return False
+        root: ast.expr = node.value
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        return isinstance(root, ast.Name) and not _bound_locally(root)
+    if isinstance(node, ast.Name):
+        return bool(_CONSTANT_NAME.match(node.id)) and not _bound_locally(node)
+    return False
+
+
+_SHOWN = (str, int, float, bool, type(None))
+
+
+def constant_text(sym: Sym, value: Any, raw: bool = False) -> Optional[str]:
+    """A named constant's value as the procedure shows it (``100``, ``"fast"``;
+    ``raw`` leaves a string unquoted, for a template), or ``None`` when it should
+    keep its ``<name>``: a value that is not a plain number, string, bool or None,
+    or a name that says it is a secret."""
+    if not sym.constant or secret_name(sym.source) or not isinstance(value, _SHOWN):
+        return None
+    if isinstance(value, str):
+        text = redact_text(value)
+        return text if raw else json.dumps(text, ensure_ascii=False)
+    return repr(value)
+
+
+def _named(node: ast.expr) -> bool:
+    """Whether a constant expression holds a name (``MY_CONST - 1``, not ``2 + 3``)."""
+    return any(isinstance(n, (ast.Name, ast.Attribute)) for n in ast.walk(node))
+
+
+def _bound_locally(name: ast.Name) -> bool:
+    """Whether a function (or comprehension) around ``name`` binds it other than by
+    an import: a parameter, an assignment, a loop variable, ``global``. ``True``
+    when the enclosing scopes cannot be seen (no parent links)."""
+    scope: Any = getattr(name, "parent", None)
+    if scope is None:
+        return True
+    while scope is not None:
+        if isinstance(scope, _FUNCTIONS) or isinstance(scope, _COMPREHENSIONS):
+            if name.id in _variables(scope):
+                return True
+        if isinstance(scope, ast.Module):
+            return False
+        scope = getattr(scope, "parent", None)
+    return True  # not inside a module: a detached node
+
+
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _variables(scope: ast.AST) -> frozenset[str]:
+    """The names a function or comprehension binds, imports excepted (cached on
+    the node: executing's trees live as long as the source)."""
+    cached = getattr(scope, "_stepdoc_variables", None)
+    if isinstance(cached, frozenset):
+        return cached
+    names: set[str] = set()
+    if isinstance(scope, _FUNCTIONS):
+        a = scope.args
+        for arg in [*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg]:
+            if arg is not None:
+                names.add(arg.arg)
+        body: list[ast.AST] = [scope.body] if isinstance(scope, ast.Lambda) else list(scope.body)
+    else:
+        body = [g.target for g in scope.generators]  # type: ignore[attr-defined]
+    stack = list(body)
+    while stack:
+        n = stack.pop()
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            names.add(n.id)
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            names.update(n.names)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            names.add(n.name)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+            continue  # its own scope
+        if isinstance(n, (*_FUNCTIONS, *_COMPREHENSIONS)) and n not in body:
+            continue
+        stack.extend(ast.iter_child_nodes(n))
+    held = frozenset(names)
+    try:
+        setattr(scope, "_stepdoc_variables", held)
+    except Exception:  # pragma: no cover
+        pass
+    return held
 
 
 def assert_source(tb: Any) -> Optional[str]:
