@@ -187,32 +187,35 @@ def _branches(
 ) -> Optional[list[Branch]]:
     """Every branch of a ``guard`` (CHK-12), in order, the default last: its label,
     whether this run took it, its check when it was built, and, from the call's
-    source, the condition as written and the code of a check that was not built
-    (a lazy one, called only when its branch is taken). None when the record has
-    no list of branches."""
+    source, the condition as written, the check as written and its wording for
+    the procedure, also for a check that was never built (a lazy one is called
+    only when its branch is taken). None when the record has no list of branches."""
     raw = d.get("branches")
     if not isinstance(raw, list):
         return None
     matched = d.get("matched_index")
     matched = matched if isinstance(matched, int) and not isinstance(matched, bool) else None
-    conditions, sources, default_source = _guard_source(location, len(raw))
+    path, conditions, checks, default_node = _guard_source(location, len(raw))
     out: list[Branch] = []
     for i, b in enumerate(raw):
         b = b if isinstance(b, Mapping) else {}
         child = b.get("check")
         holds, label = b.get("condition"), b.get("label")
+        built = isinstance(child, Mapping)
+        node = checks[i]
         out.append(
             Branch(
                 label=None if label is None else _line(label if isinstance(label, str) else str(label)),
-                condition=conditions[i],
+                condition=None if path is None else _code_of(path, conditions[i]),
                 holds=holds if isinstance(holds, bool) else None,
                 taken=i == matched,
                 check=to_check(child, root, params) if isinstance(child, Mapping) else None,
-                source=None if isinstance(child, Mapping) else sources[i],
+                source=None if built or path is None else _code_of(path, node),
+                wording=None if path is None else _wording(path, node, params),
             )
         )
     default = d.get("default")
-    if isinstance(default, Mapping) or default_source is not None:
+    if isinstance(default, Mapping) or default_node is not None:
         built = isinstance(default, Mapping)
         out.append(
             Branch(
@@ -220,7 +223,8 @@ def _branches(
                 taken=matched is None and built and d.get("error") is None,
                 default=True,
                 check=to_check(default, root, params) if isinstance(default, Mapping) else None,
-                source=None if built else default_source,
+                source=None if built or path is None else _code_of(path, default_node),
+                wording=None if path is None else _wording(path, default_node, params),
             )
         )
     return out
@@ -228,39 +232,163 @@ def _branches(
 
 def _guard_source(
     location: Optional[Location], count: int
-) -> tuple[list[Optional[str]], list[Optional[str]], Optional[str]]:
-    """From the ``guard(...)`` call at ``location``: each branch's condition and
-    check as written, and the default's check. A lambda stands for its body
-    (``lambda: mode == "fast"`` reads ``mode == "fast"``). Nothing when the source
-    cannot be read, the call is not alone on its line, or its branches are not
-    written out as a list of ``(condition, label, check)`` tuples, one per branch."""
-    none: list[Optional[str]] = [None] * count
+) -> tuple[Optional[str], list[Optional[ast.expr]], list[Optional[ast.expr]], Optional[ast.expr]]:
+    """From the ``guard(...)`` call at ``location``: its file, each branch's
+    condition and check, and the default. Nothing when the source cannot be
+    read or the call is not alone on its line; no branches when they are not
+    written out in it as a list of ``(condition, label, check)`` tuples, one per
+    branch."""
+    none: list[Optional[ast.expr]] = [None] * count
     if location is None:
-        return none, list(none), None
+        return None, none, list(none), None
     calls = calls_at(location.file, location.line, "guard")
     if len(calls) != 1:
-        return none, list(none), None
+        return None, none, list(none), None
     call = calls[0]
     path = location.file
     default = next((kw.value for kw in call.keywords if kw.arg == "default"), None)
-    default_text = _code_of(path, default)
     node = argument(call, 0, "branches")
     if not isinstance(node, (ast.List, ast.Tuple)) or len(node.elts) != count:
-        return none, list(none), default_text
+        return path, none, list(none), default
     if not all(isinstance(e, ast.Tuple) and len(e.elts) == 3 for e in node.elts):
-        return none, list(none), default_text
-    conditions = [_code_of(path, e.elts[0]) for e in node.elts]  # type: ignore[attr-defined]
-    checks = [_code_of(path, e.elts[2]) for e in node.elts]  # type: ignore[attr-defined]
-    return conditions, checks, default_text
+        return path, none, list(none), default
+    conditions = [e.elts[0] for e in node.elts]  # type: ignore[attr-defined]
+    checks = [e.elts[2] for e in node.elts]  # type: ignore[attr-defined]
+    return path, conditions, checks, default
+
+
+def _body(node: Optional[ast.expr]) -> Optional[ast.expr]:
+    """A lambda without parameters as its body; None for a missing or ``None`` node."""
+    if node is None or (isinstance(node, ast.Constant) and node.value is None):
+        return None
+    if isinstance(node, ast.Lambda) and not node.args.args and not node.args.vararg:
+        return node.body
+    return node
 
 
 def _code_of(path: str, node: Optional[ast.expr]) -> Optional[str]:
     """An expression's source on one line; a lambda without parameters as its body."""
-    if node is None or (isinstance(node, ast.Constant) and node.value is None):
+    node = _body(node)
+    return None if node is None else source_text(path, node)
+
+
+# Verify method -> check_type, for the checks a branch can be worded from (CHK-12).
+_WORDED: dict[str, str] = {
+    **{k: k for k in _COMPARISONS},
+    "between": "between",
+    "is_true": "true",
+    "is_false": "false",
+    "is_none": "is_none",
+    "is_not_none": "is_not_none",
+    "matches": "matches",
+    "is_instance": "is_instance",
+}
+_STATEMENTS = {"true": "is True", "false": "is False", "is_none": "is None", "is_not_none": "is not None"}
+
+
+def _wording(path: str, node: Optional[ast.expr], params: Params) -> Optional[Check]:
+    """How the procedure words a branch's check, read from its source
+    (``verify.greater_equal(speed, limit, name="Speed")`` reads ``'Speed': speed
+    >= <limit>``), whether the check was built or not: test parameters as
+    ``<name>``, literals as written, other values by their source (an unbuilt
+    check has no value of this run). None for anything but one ``verify.<check>``
+    call with literal names and units, or a lambda returning one. Never raises."""
+    try:
+        return _worded(path, _body(node), params)
+    except Exception:  # pragma: no cover - defensive: documents never break a run
         return None
-    if isinstance(node, ast.Lambda) and not node.args.args and not node.args.vararg:
-        node = node.body
-    return source_text(path, node)
+
+
+def _worded(path: str, node: Optional[ast.expr], params: Params) -> Optional[Check]:
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+    kind = _WORDED.get(node.func.attr)
+    if kind is None or any(kw.arg is None for kw in node.keywords):
+        return None
+    if any(isinstance(a, ast.Starred) for a in node.args):
+        return None
+    words: dict[str, Optional[str]] = {}
+    for key in ("name", "units", "actual_name", "expected_name"):
+        kw = next((k.value for k in node.keywords if k.arg == key), None)
+        if kw is None or (isinstance(kw, ast.Constant) and kw.value is None):
+            words[key] = None
+        elif isinstance(kw, ast.Constant) and isinstance(kw.value, str):
+            words[key] = _line(kw.value)
+        else:
+            return None  # a name made at run time: only the built check knows it
+    subject = _first(node)
+    if subject is None:
+        return None
+    checked = words["actual_name"] or target_pattern(subject, aliases=False) or source_text(path, subject)
+    if not checked:
+        return None
+    units = words["units"]
+    rest = _worded_rest(path, node, kind, units, words["expected_name"], params)
+    if rest is None:
+        return None
+    name = words["name"]
+    text = f"'{name}': {checked} {rest}" if name else f"{checked} {rest}"
+    return Check(text=text, passed=None, label=name)
+
+
+def _worded_rest(
+    path: str, call: ast.Call, kind: str, units: Optional[str], expected_name: Optional[str], params: Params
+) -> Optional[str]:
+    """What follows the checked value: ``>= <limit>``, ``∈ [1, 5]``, ``is None``."""
+    if kind in _STATEMENTS:
+        return _STATEMENTS[kind]
+    if kind == "between":
+        low, high = argument(call, 1, "low"), argument(call, 2, "high")
+        if low is None or high is None:
+            return None
+        inclusive = next((k.value for k in call.keywords if k.arg == "inclusive"), None)
+        if inclusive is not None and not isinstance(inclusive, ast.Constant):
+            return None
+        closed = inclusive is None or bool(inclusive.value)
+        lo, hi = _value(path, low, units, params), _value(path, high, units, params)
+        return f"∈ [{lo}, {hi}]" if closed else f"∈ ({lo}, {hi})"
+    if kind == "matches":
+        pattern = argument(call, 1, "pattern")
+        if not (isinstance(pattern, ast.Constant) and isinstance(pattern.value, str)):
+            return None
+        return f"matches /{pattern.value}/"
+    if kind == "is_instance":
+        expected = argument(call, 1, "expected_type")
+        text = source_text(path, expected) if expected is not None else None
+        return None if text is None else f"is instance of {text}"
+    op, position, keyword = _COMPARISONS[kind]
+    expected = argument(call, position, keyword)
+    if expected is None:
+        return None
+    shown = f"<{expected_name}>" if expected_name else _value(path, expected, None if kind == "length" else units, params)
+    if kind != "approx":
+        return f"{op} {shown}"
+    tolerance = []
+    for key, mark in (("abs_tol", ""), ("rel_tol", "%")):
+        node = next((k.value for k in call.keywords if k.arg == key), None)
+        if node is None or (isinstance(node, ast.Constant) and node.value is None):
+            continue
+        if mark and isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            tolerance.append(f"{node.value * 100:g}%")
+        else:
+            tolerance.append(_value(path, node, units if not mark else None, params))
+    if len(tolerance) == 2:
+        return f"{op} {shown} ± {tolerance[0]} (abs) ± {tolerance[1]} (rel)"
+    return f"{op} {shown}" + (f" ± {tolerance[0]}" if tolerance else "")
+
+
+def _value(path: str, node: ast.expr, units: Optional[str], params: Params) -> str:
+    """An operand in the procedure: a literal as its value with its units
+    (``100V``), a test parameter as ``<limit> V``, anything else by its source."""
+    try:
+        value = ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        sym = symbolic(path, node, params, True)
+        text = sym or source_text(path, node) or ast.unparse(node)
+        return f"{text} {units}" if units else text
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value}{units or ''}"
+    return repr(value)
 
 
 def _fold_each(check: Check, d: Mapping[str, Any]) -> None:

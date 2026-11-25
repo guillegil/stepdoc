@@ -138,10 +138,15 @@ verify.guard(
 )
 ```
 
-- Write the branches as a list of `(condition, label, check)` tuples in the call:
-  the LaTeX documents read each condition from there (`If mode == "fast" (fast mode): ...`).
-  Branches built elsewhere are named by their labels only.
-- The LaTeX procedure lists every branch; the report bolds the one taken.
+- Procedure: `Verify 'Speed for the mode', depending on the condition:`, then one line
+  per branch (`If mode == "fast" (fast mode): Verify 'Speed': speed >= 100`, `Else if ...`,
+  `Otherwise: ...`), every branch in every case. Report: the taken branch's result; the
+  others say `condition false` or `not evaluated`.
+- Write the branches as a list of `(condition, label, check)` tuples in the call, each
+  check as one `verify.<check>(...)` call (a lambda is fine) with literal `name=`/`units=`:
+  stepdoc reads conditions and checks from there, also for lazy checks never built.
+  Branches built elsewhere are named by their labels only; a check with `**kwargs`
+  shows as its source.
 
 ## step(check=...)
 

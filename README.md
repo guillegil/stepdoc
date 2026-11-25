@@ -488,13 +488,30 @@ the plugin already publishes:
   first and last 32) and its `children` are the failed items, each with its
   `index`.
 - **pytest-verifier's `verify.guard`** (an if/elif/else chain of checks): the
-  run record keeps every branch of the chain (`branches`: each with its
-  `label`, its `condition` as written in the call, whether it `holds` in this
-  run, whether it was `taken`, and its `check`; the `default` comes last). A
-  lazy check (`lambda: verify.equal(...)`) is only built when its branch is
-  taken, so a branch that was not taken keeps the check's `source` instead. The
-  LaTeX documents list the branches (see [LaTeX](#latex)); the other formats
-  show the guard as one line, as before.
+  check reads `Verify 'Speed for the mode', depending on the condition:` and
+  every branch follows on its own line, the default last, in every format:
+
+  ```text
+  1.1. Verify 'Speed for the mode', depending on the condition:
+     - If mode == "fast" (fast mode): Verify 'Speed': speed >= <limit> rpm
+     - Else if mode == "slow" (slow mode): Verify 'Speed': speed ∈ [30, MAX]
+     - Otherwise: Verify speed == 40 is True
+  ```
+
+  pytest-verifier builds a lazy check (`lambda: verify.equal(...)`) only when
+  its branch is taken, so stepdoc reads every branch from the `verify.guard(...)`
+  call: the condition as written, and the check worded like a built one (test
+  parameters as `<name>`, literals as written; a value no case computed, such as
+  `MAX` above, by its source). The procedure lists every branch the same way in
+  every case, so a parametrized test that takes different branches has one
+  procedure. The report shows the taken branch's result and mark, and says of
+  the others `condition false` (before it) or `not evaluated` (after it); HTML
+  and LaTeX grey them out. Branches need to be written in the call as a list of
+  `(condition, label, check)` tuples; otherwise a branch is named by its label
+  (`If fast mode:`), and a check that cannot be worded (`**kwargs`, a name made
+  at run time) shows as its source. In the run record the check has `branches`
+  (`label`, `condition`, `holds`, `taken`, `default`, `check` when built,
+  `source`, and `wording`); the generic JSON gives each node's `branches`.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.
@@ -624,7 +641,7 @@ out the others, `(condition false)` before it and `(not evaluated)` after it:
 (grey text, shown struck out here). The condition is read from the
 `verify.guard(...)` call when its branches are written in it as a list of
 tuples; otherwise a branch is named by its label (`If fast mode:`). A lazy
-check that no case built shows as the call that would build it.
+check no case built is worded from its source (see [Adapters](#adapters)).
 
 ## Rendering a saved record
 

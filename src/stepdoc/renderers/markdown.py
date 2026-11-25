@@ -80,6 +80,15 @@ def _md_doc(doc: Optional[dict[str, str]]) -> list[str]:
     return out
 
 
+def _branch(line: Line) -> str:
+    """CHK-12: ``If `mode == "fast"` (fast mode):`` before a branch's check."""
+    if line.branch is None:
+        return ""
+    word, cond, label = line.branch
+    parts = [word] + ([_code(cond)] if cond else []) + ([f"({_prose(label)})" if cond else _prose(label)] if label else [])
+    return " ".join(parts) + ":"
+
+
 def _md_line(line: Line) -> str:
     indent = "  " * line.depth
     if line.is_step:
@@ -88,7 +97,7 @@ def _md_line(line: Line) -> str:
     else:
         num = f"{line.number}. " if line.number else ""
         label = _prose(line.label) if line.label else ""
-        parts = [num + " ".join(p for p in (line.verb, label, _code(line.code)) if p)]
+        parts = [num + " ".join(p for p in (_branch(line), line.verb, label, _code(line.code)) if p)]
         if line.aside:
             parts.append(f"({_prose(line.aside)})")
         if line.result:

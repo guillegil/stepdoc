@@ -67,7 +67,23 @@
         "result": {"type": "string", "description": "A read bound to a name: <rdata>"},
         "note": {"type": "string", "description": "note= of a step or repeat, a check's note, or 'value from this run' on an action"},
         "applied_in": {"type": "string", "description": "A pre-condition a shared fixture applied for that earlier test"},
-        "steps": {"type": "array", "items": {"$ref": "#/$defs/node"}}
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+        "branches": {"type": "array", "items": {"$ref": "#/$defs/branch"}, "description": "A guarded check's branches (CHK-12, pytest-verifier's guard), in order, the default last"}
+      }
+    },
+    "branch": {
+      "type": "object",
+      "required": ["if"],
+      "properties": {
+        "if": {"enum": ["If", "Else if", "Otherwise"]},
+        "condition": {"type": "string", "description": "The condition as written in the guard(...) call"},
+        "branch_label": {"type": "string", "description": "The branch's label; for a branch without a known condition, what names it"},
+        "text": {"type": "string", "description": "The branch's check as the procedure shows it, without the opening"},
+        "verb": {"type": "string"},
+        "label": {"type": "string", "description": "The check's name in quotes"},
+        "code": {"type": "string"},
+        "note": {"type": "string"},
+        "source": {"type": "string", "description": "The check's source, when it can be worded no other way"}
       }
     }
   }

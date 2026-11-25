@@ -90,11 +90,29 @@ _DOC_CSS = """
 .doc-title { font-weight: 600; }
 """
 
+# Only on pages that show a guarded check's branches (CHK-12).
+_BRANCH_CSS = """
+.line.not-run { color: var(--muted); }
+.branch code { font-weight: 600; }
+"""
+
+
+def _has_branches(entries: list[Record]) -> bool:
+    for e in entries:
+        if e.get("branches") or _has_branches(e.get("entries") or []):
+            return True
+        if _has_branches(e.get("children") or []):
+            return True
+    return False
+
+
 _MARK_CLASS = {"✓": "mark-pass", "✗": "mark-fail", "?": "mark-unknown", "·": "mark-unknown"}
 
 
 def _page(title: str, record: Record, body: list[str]) -> str:
     css = _CSS + _DOC_CSS if any(case_doc(t) for t in record["tests"]) else _CSS
+    if any(_has_branches(t["steps"] + t["unscoped"]) for t in record["tests"]):
+        css += _BRANCH_CSS
     gen = record.get("generator") or {}
     meta = f"stepdoc {gen.get('version', '')} · {record.get('created_at', '')}"
     if record.get("dry_run"):
@@ -174,18 +192,29 @@ def _doc(doc: Optional[dict[str, str]]) -> list[str]:
     return [f'<div class="doc">{"".join(parts)}</div>']
 
 
+def _branch(line: Line) -> str:
+    """CHK-12: ``If <code>mode == "fast"</code> (fast mode):`` before a branch's check."""
+    if line.branch is None:
+        return ""
+    word, cond, label = line.branch
+    parts = [escape(word)] + ([_code(cond)] if cond else [])
+    if label:
+        parts.append(f"({escape(label)})" if cond else escape(label))
+    return '<span class="branch">' + " ".join(parts) + ":</span>"
+
+
 def _line(line: Line) -> str:
     pad = f' style="margin-left:{line.depth * 1.5}em"' if line.depth else ""
     if line.is_step and line.number is None:
         return f'<div class="line section"{pad}>{escape(line.code)}</div>'
-    cls = "line step" if line.is_step else "line"
+    cls = "line step" if line.is_step else ("line not-run" if line.not_run else "line")
     num = f'<span class="num">{escape(line.number)}</span>' if line.number else '<span class="num">·</span>'
     if line.is_step:
         body = _title(line.code)
     else:
         label = f'<span class="label">{escape(line.label)}</span>' if line.label else ""
         code = _expr(line.code) if line.is_check else _code(line.code)
-        body = " ".join(p for p in (escape(line.verb), label, code) if p)
+        body = " ".join(p for p in (_branch(line), escape(line.verb), label, code) if p)
         if line.aside:
             body += f' <span class="aside">({escape(" ".join(line.aside.split()))})</span>'
         if line.result:

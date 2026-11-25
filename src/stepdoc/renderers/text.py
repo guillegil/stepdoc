@@ -34,12 +34,17 @@ def render_procedure(record: Record) -> str:
             out.extend(procedure_lines(proc.precondition, ("precondition",)))
         if proc.setup is not None:
             out.extend(procedure_lines(proc.setup, ("setup",)))
-        for lines, members in proc.variants:
+        for _, members in proc.variants:
             if len(proc.variants) > 1:
                 out.append(f"Variant for: {', '.join(m['case'] or m['id'] for m in members)}")
             elif proc.framed:
                 out.append("Procedure")
-            out.extend(lines)
+            longest: list[str] = []
+            for m in members:
+                lines = procedure_lines(m, ("procedure",))
+                if len(lines) > len(longest):
+                    longest = lines
+            out.extend(longest)
         if proc.teardown is not None:
             out.extend(procedure_lines(proc.teardown, ("teardown",)))
         out.append("")

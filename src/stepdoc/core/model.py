@@ -171,7 +171,11 @@ class Branch:
     branch is taken)."""
     source: Optional[str] = None
     """The source of a check that was not built (``verify.equal(speed, 40,
-    name="Speed")``), so the procedure can still say what the branch checks."""
+    name="Speed")``)."""
+    wording: Optional["Check"] = None
+    """The branch's check as its source words it, for the procedure (``'Speed':
+    speed >= <limit>``, not judged), built or not: every branch reads the same in
+    every case. None when the source is not one ``verify.<check>(...)`` call."""
 
 
 @dataclass

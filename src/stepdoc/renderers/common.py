@@ -38,6 +38,12 @@ class Line:
     """A check's name with its quotes (``'FIFO not full':``), words shown between
     ``verb`` and ``code`` (CHK-10)."""
     is_check: bool = False
+    branch: Optional[tuple[str, Optional[str], Optional[str]]] = None
+    """For a branch of a guarded check (CHK-12): its opening word (``If``,
+    ``Else if``, ``Otherwise``), condition (code) and label (words), shown before
+    the branch's check: ``If mode == "fast" (fast mode): Verify ...``."""
+    not_run: bool = False
+    """A branch this run did not check (the report greys it out where it can)."""
 
 
 def show(value: Any) -> str:
@@ -170,13 +176,77 @@ def check_line(c: Record, symbolic: bool, depth: int) -> Line:
     label, code = _split_label(c.get("label"), code)
     if isinstance(c.get("index"), int):  # CHK-11: one failed item of a folded check
         label = f"item [{c['index']}]:"
-    if c.get("selected"):
+    if c.get("branches"):  # CHK-12: the branches follow, each on its own line
+        name = c.get("label")
+        label = f"'{name}', depending on the condition:" if name else "depending on the condition:"
+        code = ""
+        result = None
+    elif c.get("selected"):
         code += f" [→ {c['selected']}]"
     note = c.get("note") or None
     return Line(
         c.get("number"), "Verify", code, result, mark=mark, depth=depth, aside=note, label=label,
         is_check=True,
     )
+
+
+def branch_opening(b: Record, index: int) -> tuple[str, Optional[str], Optional[str]]:
+    """``("If", 'mode == "fast"', "fast mode")``, ``("Else if", ...)``,
+    ``("Otherwise", None, None)``. A branch whose condition is not known is named
+    by its label, or by its position."""
+    if b.get("default"):
+        return "Otherwise", None, None
+    word = "If" if index == 0 else "Else if"
+    cond, label = b.get("condition"), b.get("label")
+    if not cond and not label:
+        label = f"branch {index + 1}"
+    return word, cond or None, label or None
+
+
+def branch_check(b: Record, symbolic: bool) -> Optional[Record]:
+    """The check a branch line shows: in the report the check this run built;
+    in the procedure, and for a branch this run did not build, the check as its
+    source words it (the same in every case), else the built one."""
+    check: Optional[Record] = b.get("check")
+    if not symbolic and check is not None:
+        return check
+    wording: Optional[Record] = b.get("wording")
+    return wording or check
+
+
+def branch_lines(c: Record, symbolic: bool, depth: int) -> Iterator[Line]:
+    """CHK-12: one line per branch of a guarded check. In the report the branch
+    the run took has its result and mark; the others say why they were not
+    checked (``condition false`` before it, ``not evaluated`` after it)."""
+    seen_taken = False
+    for i, b in enumerate(c.get("branches") or []):
+        check = branch_check(b, symbolic)
+        taken = bool(b.get("taken"))
+        if check is not None:
+            line = check_line(check, symbolic or not taken, depth)
+        else:
+            line = Line(None, "Verify", b.get("source") or "", depth=depth, is_check=True)
+        line.number = None
+        line.branch = branch_opening(b, i)
+        if not symbolic:
+            if taken:
+                seen_taken = True
+            else:
+                line.mark = line.result = None
+                line.not_run = True
+                line.note = "condition false" if b.get("holds") is False and not seen_taken else "not evaluated"
+        else:
+            line.mark = line.result = None
+        yield line
+
+
+def branch_text(line: Line) -> str:
+    """A branch line's opening as plain text: ``If mode == "fast" (fast mode):``."""
+    if line.branch is None:
+        return ""
+    word, cond, label = line.branch
+    parts = [word] + ([cond] if cond else []) + ([f"({label})" if cond else label] if label else [])
+    return " ".join(parts) + ":"
 
 
 def each_result(each: Record, judged: bool = True) -> str:
@@ -213,6 +283,7 @@ def entry_lines(entries: list[Record], symbolic: bool, depth: int) -> Iterator[L
                 continue  # CHK-11: the failed items belong to this run, not the procedure
             for child in e.get("children") or []:
                 yield check_line(child, symbolic, depth + 1)
+            yield from branch_lines(e, symbolic, depth + 1)
         else:
             yield action_line(e, symbolic, depth)
 
@@ -290,7 +361,7 @@ def plain(line: Line) -> str:
 
 def line_body(line: Line) -> str:
     """A line's text without its number, indent, status mark or notes."""
-    body = " ".join(p for p in (line.verb, line.label, line.code) if p)
+    body = " ".join(p for p in (branch_text(line), line.verb, line.label, line.code) if p)
     if line.aside:
         body += f" ({' '.join(line.aside.split())})"
     if line.result:
@@ -404,7 +475,7 @@ def procedures(record: Record) -> list[Procedure]:
     for pid, cases in groups.items():
         variants: list[tuple[list[str], list[Record]]] = []
         for case in cases:
-            lines = procedure_lines(case, ("procedure",))
+            lines = path_lines(case)
             for i, (known, members) in enumerate(variants):
                 # A case that stopped early (a failure) follows the longer procedure.
                 if known[: len(lines)] == lines:
@@ -426,6 +497,13 @@ def procedures(record: Record) -> list[Procedure]:
             )
         )
     return result
+
+
+def path_lines(case: Record) -> list[str]:
+    """The lines that tell the paths of a procedure apart. A guard's branches
+    are left out: every case lists them all, but a branch one case built may read
+    with this run's values (CHK-12)."""
+    return [plain(line) for line in test_lines(case, symbolic=True, sections=("procedure",)) if line.branch is None]
 
 
 def _fullest(cases: list[Record], section: str) -> Optional[Record]:
