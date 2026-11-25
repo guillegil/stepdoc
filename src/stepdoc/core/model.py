@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
 
-from .symbolic import Resolution, Site, apply_target_pattern, constant_text
+from .symbolic import Params, Resolution, Site, apply_target_pattern, constant_text
 
 Status = Literal["passed", "failed", "error", "not_run", "unknown"]
 Direction = Literal["in", "out", "exchange"]
@@ -77,8 +77,10 @@ class Action:
     target_fields: tuple[str, ...] = field(default=(), repr=False, compare=False)
     target_template: Optional[str] = field(default=None, repr=False, compare=False)
 
-    def resolve(self) -> None:
-        """Turn the captured call site into symbolic text. Idempotent."""
+    def resolve(self, params: Params = None) -> None:
+        """Turn the captured call site into symbolic text. Idempotent. ``params``
+        are the names of the test's parameters: only values that come from them
+        stay generic (SYM-9)."""
         site, self.site = self.site, None
         if self.name is not None and self.direction != "out":
             self.symbolic_value = f"<{self.name}>"
@@ -97,7 +99,7 @@ class Action:
         if self.direction == "out":
             self.read_expr = res.node_source
         if self.direction != "out" and self.name is None:
-            sym = res.select_value(self.value_from)
+            sym = res.select_value(self.value_from, params)
             if sym is not None:
                 self.expr = None if sym.literal else sym.source
                 self.symbolic_value = sym.text
@@ -106,7 +108,7 @@ class Action:
         if self.target_template is not None:
             parts: dict[str, str] = {}
             for name in self.target_fields:
-                fsym = res.select_value((name,))
+                fsym = res.select_value((name,), params)
                 if fsym is not None and fsym.constant and name in self.meta:
                     shown = constant_text(fsym, self.meta[name], raw=True)
                     parts[name] = fsym.raw if shown is None else shown

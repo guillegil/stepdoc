@@ -162,7 +162,7 @@ def test_verify_checks_go_into_their_steps(verify_project):
         "1. Create user",
         "   1.1. Verify 'HTTP status' == 201",
         "   1.2. Inner",
-        "      1.2.1. Verify 'Voltage' == <age * 0.055> V ± 0.05 V",
+        "      1.2.1. Verify 'Voltage' == 1.65 V ± 0.05 V",
         "   1.3. Verify 'Stored name' == 'Ana'",
         "2. Check stored user",
         "   2.1. Verify 'Stored age': user[\"age\"] == <age>",

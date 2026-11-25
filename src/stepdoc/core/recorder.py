@@ -63,6 +63,11 @@ class Recorder:
         self.comment_notes = comment_notes
         """Take a check's note from the source comment at its line when it has none
         (CHK-9); looked up in :meth:`resolve`, after the test."""
+        self.params: Optional[frozenset[str]] = None
+        """The names of the test's parameters (the pytest plugin sets them from
+        ``callspec.params``): only values that come from them stay generic in the
+        procedure (SYM-9). ``None``: not known, only named constants show their
+        value."""
         self.section: Section = "procedure"
         """Phase new top-level steps and unscoped entries belong to (STEP-8). The
         pytest plugin sets it around fixture setup and teardown."""
@@ -393,7 +398,7 @@ class Recorder:
         files can change, e.g. at test teardown)."""
         self._flush(None)
         for a in self.iter_actions():
-            a.resolve()
+            a.resolve(self.params)
         self.resolve_notes()
 
     def resolve_notes(self) -> None:
