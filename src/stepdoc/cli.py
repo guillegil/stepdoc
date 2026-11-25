@@ -1,6 +1,7 @@
 """The ``stepdoc`` command (OUT-6). Works without pytest installed.
 
     stepdoc render run.json --procedure procedure.html --report report.md
+    stepdoc render run.json --generic generic.json  # generic procedure as JSON
     stepdoc render run.json                      # procedure as Markdown on stdout
     stepdoc render run.json --doc report --format text
     stepdoc skill install                         # .claude/skills/ and .agents/skills/
@@ -18,6 +19,7 @@ from typing import Optional, Sequence
 from . import skills
 from .core.record import load
 from .renderers import FORMATS, Doc, format_for_path, render
+from .renderers.generic import render_generic
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,6 +33,8 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("record", help="path of the JSON run record")
     r.add_argument("--procedure", metavar="PATH", help="write the procedure here")
     r.add_argument("--report", metavar="PATH", help="write the executed report here")
+    r.add_argument("--generic", metavar="PATH",
+                   help="write the generic procedure as JSON here, one entry per test")
     r.add_argument(
         "--format",
         choices=sorted(FORMATS),
@@ -124,15 +128,21 @@ def _render(args: argparse.Namespace) -> int:
 
     wanted: list[tuple[Doc, Optional[str]]] = [("procedure", args.procedure), ("report", args.report)]
     targets = [(doc, path) for doc, path in wanted if path]
-    if not targets:
+    if args.generic:
+        _save(args.generic, render_generic(record))
+    elif not targets:
         sys.stdout.write(render(record, args.doc, args.format or "md"))
         return 0
     for doc, path in targets:
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(render(record, doc, args.format or format_for_path(path)), encoding="utf-8")
-        print(f"stepdoc: wrote {out}")
+        _save(path, render(record, doc, args.format or format_for_path(path)))
     return 0
+
+
+def _save(path: str, text: str) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(f"stepdoc: wrote {out}")
 
 
 if __name__ == "__main__":  # pragma: no cover

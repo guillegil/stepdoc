@@ -146,6 +146,7 @@ enable_assertion_pass_hook = true
 pytest --stepdoc-procedure=out/procedure.md --stepdoc-report=out/report.html --stepdoc-record=out/run.json
 pytest --stepdoc-dry-run --stepdoc-procedure=out/procedure.md   # against simulated backends
 stepdoc render out/run.json --procedure procedure.html          # again, without running tests
+pytest --stepdoc-generic=out/step-generic.json                  # generic procedure as JSON, one entry per test
 ```
 
 The file extension picks the format: `.md`, `.html` or `.txt`.

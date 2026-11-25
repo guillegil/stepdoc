@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stepdoc:schema:generic:1.0",
+  "title": "stepdoc generic procedure",
+  "description": "The generic procedure of each test (--stepdoc-generic): one entry per test, all its cases (parameter sets, strategy vectors) in one, without results.",
+  "type": "object",
+  "required": ["schema_version", "tests"],
+  "properties": {
+    "$schema": {"const": "urn:stepdoc:schema:generic:1.0"},
+    "schema_version": {"const": "1.0"},
+    "generator": {"type": ["object", "null"]},
+    "created_at": {"type": ["string", "null"], "format": "date-time"},
+    "tests": {"type": "array", "items": {"$ref": "#/$defs/test"}}
+  },
+  "$defs": {
+    "section": {"enum": ["precondition", "setup", "procedure", "teardown"]},
+    "test": {
+      "type": "object",
+      "required": ["test_id", "test_name", "test_file", "test_path", "cases", "steps"],
+      "properties": {
+        "test_id": {"type": "string", "description": "pytest node id without the parameter id, e.g. tests/api/test_users.py::TestUsers::test_create"},
+        "test_name": {"type": "string", "description": "The test function's name, e.g. test_create"},
+        "test_file": {"type": "string", "description": "The test file's name, e.g. test_users.py"},
+        "test_path": {"type": "string", "description": "The test file's path relative to the pytest root, e.g. tests/api/test_users.py"},
+        "doc": {"type": "object", "description": "The test function's docstring, as in the run record (DOC-1)"},
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "values"],
+            "properties": {
+              "name": {"type": "string"},
+              "description": {"type": ["string", "null"]},
+              "values": {"type": "array", "items": {"type": "string"}, "description": "The values the cases used, or the adapter's domain (integer 0 … 4095)"}
+            }
+          }
+        },
+        "strategy": {"type": "string", "description": "The generator of the cases' values, when an adapter names it"},
+        "cases": {"type": "integer", "minimum": 1, "description": "How many cases (runs) this entry stands for"},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+        "variants": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Only when the cases took different paths: each path of the procedure section with the cases (parameter ids) that took it. steps holds the first one",
+          "items": {
+            "type": "object",
+            "required": ["cases", "steps"],
+            "properties": {
+              "cases": {"type": "array", "items": {"type": "string"}},
+              "steps": {"type": "array", "items": {"$ref": "#/$defs/node"}}
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["kind", "number", "section", "text"],
+      "properties": {
+        "kind": {"enum": ["step", "action", "check", "repeat"]},
+        "number": {"type": ["string", "null"], "description": "1, 1.2, S1, T1.1, P1; null for an entry outside any step"},
+        "section": {"$ref": "#/$defs/section"},
+        "text": {"type": "string", "description": "The line as the procedure shows it, without its number"},
+        "verb": {"type": "string"},
+        "label": {"type": "string", "description": "A named check's name in quotes"},
+        "code": {"type": "string"},
+        "result": {"type": "string", "description": "A read bound to a name: <rdata>"},
+        "note": {"type": "string", "description": "note= of a step or repeat, a check's note, or 'value from this run' on an action"},
+        "applied_in": {"type": "string", "description": "A pre-condition a shared fixture applied for that earlier test"},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/node"}}
+      }
+    }
+  }
+}

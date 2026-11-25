@@ -28,6 +28,16 @@
   The documents do not change.
 
 ### Added
+- The generic procedure as JSON (OUT-7). `--stepdoc-generic=PATH` (and
+  `stepdoc render run.json --generic PATH`) writes one entry per test, however
+  many cases it ran: the cases of a parametrized test or the vectors of a
+  strategy share it, and it holds no results. Each entry has `test_id`,
+  `test_name`, `test_file`, `test_path`, `cases` (how many) and `steps`, the
+  procedure's lines as a tree (`kind`, `number`, `section`, `text`, and `verb`,
+  `label`, `code`, `result`, `note` when they apply), plus `doc`, `parameters`,
+  `strategy` and `variants` (cases that took different paths) when the test has
+  them. The text is the procedure's, from the same renderer. Schema:
+  `src/stepdoc/schema/generic.schema.json` (`urn:stepdoc:schema:generic:1.0`).
 - Test descriptions from docstrings (DOC-1). A test function's own docstring is
   shown under the test's heading, before its parameters and steps, in the
   procedure (once per test, from the first case that has one) and the report
