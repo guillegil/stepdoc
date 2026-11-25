@@ -436,8 +436,8 @@ def test_two_checks_on_one_line_are_told_apart_by_their_operand_names(project):
     run(project).assert_outcomes(passed=1)
     assert numbered(lines(project, "procedure.txt")) == [
         "1. Two names",
-        "   1.1. Verify R1 == <w>",
-        "   1.2. Verify 'Second': R2 == <w>",
+        "   1.1. Verify R1 == 0",
+        "   1.2. Verify 'Second': R2 == 0",
         "2. One name twice",
         # Either call may have made each check: plain text, reads on their own lines.
         "   2.1. Read dev.block.esmi1_ctl.tx",
@@ -969,11 +969,12 @@ def test_recorder_notes_for_asserts_and_the_switch():
     assert "(one is not two)" in render(record, "procedure", "text")
 
 
-def test_constants_show_their_value_in_the_procedure(project):
-    """SYM-9: a module constant is the same in every run, so the procedure shows
-    its value; a parameter or a local keeps its ``<name>``."""
+def test_only_test_parameters_stay_generic(project):
+    """SYM-9: only a value that comes from a test parameter stays ``<name>`` in
+    the procedure; constants, local variables, other objects' attributes and
+    fixtures show this run's value."""
     project.makepyfile(
-        limits="MAX_TX = 8\n",
+        limits="MAX_TX = 8\n\n\nclass Cfg:\n    gain = 2\n",
         test_consts='''
         import pytest
         import limits
@@ -983,24 +984,39 @@ def test_constants_show_their_value_in_the_procedure(project):
         MY_CONST = 1
 
 
+        def check_tx(verify, dat, want):
+            verify.equal(dat.tx8e, want)
+
+
         @pytest.mark.parametrize("channel", [3])
         def test_consts(verify, tb, channel):
             dat = getattr(tb.dev.block, f"esmi{channel}_32dat")
             expected = 1
+            offset = channel - 2
+            cfg = limits.Cfg()
             with step("Verify"):
                 verify.equal(dat.txfe, MY_CONST)
                 verify.equal(dat.tx8e, expected)
-                verify.between(dat.txfe, MY_CONST - 1, limits.MAX_TX)
+                verify.equal(dat.txfe, offset)
+                verify.between(dat.txfe, MY_CONST - 1, limits.MAX_TX * cfg.gain)
                 verify.between(dat.tx8e, channel - 3, MAX_TX)
+                verify.between(dat.txfe, 0, len(tb.dev.on_read) + 10)
+                check_tx(verify, dat, expected)
+                for i in [1]:
+                    verify.equal(dat.txfe, i)
         ''',
     )
     run(project).assert_outcomes(passed=1)
     assert numbered(lines(project, "procedure.txt")) == [
         "1. Verify",
         "   1.1. Verify dev.block.esmi<channel>_32dat.txfe == 1",
-        "   1.2. Verify dev.block.esmi<channel>_32dat.tx8e == <expected>",
-        "   1.3. Verify dev.block.esmi<channel>_32dat.txfe ∈ [0, 8]",
-        "   1.4. Verify dev.block.esmi<channel>_32dat.tx8e ∈ [<channel - 3>, 8]",
+        "   1.2. Verify dev.block.esmi<channel>_32dat.tx8e == 1",
+        "   1.3. Verify dev.block.esmi<channel>_32dat.txfe == <offset>",
+        "   1.4. Verify dev.block.esmi<channel>_32dat.txfe ∈ [0, 16]",
+        "   1.5. Verify dev.block.esmi<channel>_32dat.tx8e ∈ [<channel - 3>, 8]",
+        "   1.6. Verify dev.block.esmi<channel>_32dat.txfe ∈ [0, 11]",
+        "   1.7. Verify dev.block.esmi3_32dat.tx8e == <want>",  # a helper: its inputs stay generic
+        "   1.8. Verify dev.block.esmi<channel>_32dat.txfe == <i>",
     ]
     report = lines(project, "report.txt")
     assert "   1.1. Verify dev.block.esmi3_32dat.txfe == 1 -> got 1   ✓" in report

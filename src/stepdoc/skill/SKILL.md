@@ -42,10 +42,11 @@ Rules that keep the procedure readable:
    imperative phrases: "Create user", "Select mode and level".
 2. **Nest steps** for sub-procedures. Nesting decides the numbering (1, 1.1, 1.2.1);
    actions, checks and child steps share it.
-3. **Pass named variables, not literals,** when the value is a parameter of the
-   test. `dev.map.dac.level = level` documents as `<level>`; `= 2048` documents as
-   `2048`. Use literals, or upper-case module constants (`MAX_LEVEL`, shown as
-   their value), only for values that never change.
+3. **Make a value a test parameter** (`@pytest.mark.parametrize`, a strategy)
+   when it varies between cases: only values that come from parameters document
+   as `<name>` (`dev.map.dac.level = level` with `level` a parameter reads
+   `<level>`). Constants, local variables, fixtures and other objects' attributes
+   document as this run's value (`= 2048`).
 4. **Use `@step("…")` on helpers** that form one logical step (`wait_pll_lock`).
    Add `record=False` when the helper's low-level actions would only add noise.
 5. **Keep actions inside steps.** Actions outside any step land in an "Unscoped"

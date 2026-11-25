@@ -160,6 +160,8 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: Optional[pytest.Item]) 
         collapse_repeats=state.collapse_repeats,
         comment_notes=state.comment_notes,
     )
+    callspec = getattr(item, "callspec", None)
+    rec.params = frozenset(callspec.params) if callspec is not None else frozenset()
     item.stash[_recorder_key] = rec
 
     def notify(event: str, s: Step) -> None:

@@ -326,8 +326,8 @@ def test_calls_on_one_line_and_names_the_description_shows_another_way(project):
     generic = sys.version_info >= (3, 11)
     assert numbered(project, "procedure.txt") == [
         "1. One line",
-        "   1.1. Verify R1 == <w>",
-        "   1.2. Verify R<channel - 1>.F == <w>" if generic else "   1.2. Verify R2.F == <w>",
+        "   1.1. Verify R1 == 243",
+        "   1.2. Verify R<channel - 1>.F == 243" if generic else "   1.2. Verify R2.F == 243",
         "2. Names that read alike",
         # Either call may have made each check: reads on their own lines, the value as it was.
         "   2.1. Read tb.dev.map.block.reg1.F",

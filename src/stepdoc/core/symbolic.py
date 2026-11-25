@@ -37,6 +37,8 @@ __all__ = [
     "is_constant",
     "secret_name",
     "constant_text",
+    "varies",
+    "Params",
 ]
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -195,8 +197,9 @@ class Sym:
     """Plain source of the expression: ``width``."""
     literal: bool
     constant: bool = False
-    """A named constant (``MY_CONST``, ``consts.LIMIT``, ``MY_CONST + 1``): it is
-    the same in every run, so the procedure shows its value (SYM-9)."""
+    """Not generic: the value is not a test parameter's and does not depend on
+    one (a constant, a local variable, another object's attribute), so the
+    procedure shows the value itself (SYM-9)."""
 
 
 @dataclass
@@ -244,14 +247,16 @@ class Resolution:
                     return self.args[i]
         return None
 
-    def select_value(self, value_from: Optional[Sequence[Selector]] = None) -> Optional[Sym]:
-        key = None if value_from is None else tuple(value_from)
+    def select_value(
+        self, value_from: Optional[Sequence[Selector]] = None, params: "Params" = None
+    ) -> Optional[Sym]:
+        key = (None if value_from is None else tuple(value_from), params)
         try:
             return self._rendered[key]
         except KeyError:
             pass
         node = self.node_for(value_from)
-        sym = None if node is None else render(self._expand(node))
+        sym = None if node is None else render(self._expand(node), params)
         self._rendered[key] = sym
         return sym
 
@@ -588,11 +593,12 @@ def _literal_text(value: Any) -> str:
     return repr(value)
 
 
-def render(node: ast.expr) -> Sym:
+def render(node: ast.expr, params: "Params" = None) -> Sym:
     """Literals stay literal, everything else becomes ``<expr>``; containers and
-    f-strings are rendered part by part."""
+    f-strings are rendered part by part. ``constant`` tells whether the value is
+    generic (:func:`varies`)."""
     text, raw, literal = _render(node)
-    constant = not literal and is_constant(node)
+    constant = not literal and not varies(node, params)
     return Sym(text=text, raw=raw, source=_unparse(node), literal=literal, constant=constant)
 
 
@@ -719,16 +725,145 @@ _SHOWN = (str, int, float, bool, type(None))
 
 
 def constant_text(sym: Sym, value: Any, raw: bool = False) -> Optional[str]:
-    """A named constant's value as the procedure shows it (``100``, ``"fast"``;
-    ``raw`` leaves a string unquoted, for a template), or ``None`` when it should
-    keep its ``<name>``: a value that is not a plain number, string, bool or None,
-    or a name that says it is a secret."""
-    if not sym.constant or secret_name(sym.source) or not isinstance(value, _SHOWN):
+    """A value that is not generic as the procedure shows it (``100``, ``"fast"``,
+    ``[1, 2]``, ``{"mode": 1}``; ``raw`` leaves a string unquoted, for a
+    template), or ``None`` when it should keep its ``<name>``: a value other than
+    numbers, strings, bools and None (also in lists, tuples and dicts), or a name
+    that says it is a secret."""
+    if not sym.constant or secret_name(sym.source):
         return None
-    if isinstance(value, str):
-        text = redact_text(value)
-        return text if raw else json.dumps(text, ensure_ascii=False)
-    return repr(value)
+    if raw and isinstance(value, str):
+        return redact_text(value)
+    return _value_text(value, 0)
+
+
+def _value_text(value: Any, depth: int) -> Optional[str]:
+    if isinstance(value, _SHOWN):
+        if isinstance(value, str):
+            return json.dumps(redact_text(value), ensure_ascii=False)
+        if isinstance(value, float) and value != value:
+            return None
+        return repr(value)
+    if depth > 4:
+        return None
+    if isinstance(value, (list, tuple)):
+        parts = [_value_text(v, depth + 1) for v in value]
+        if any(p is None for p in parts):
+            return None
+        inner = ", ".join(parts)  # type: ignore[arg-type]
+        if isinstance(value, list):
+            return f"[{inner}]"
+        return f"({inner}{',' if len(parts) == 1 else ''})"
+    if isinstance(value, dict):
+        items = []
+        for k, v in value.items():
+            if not isinstance(k, str):
+                return None
+            shown = json.dumps(MASK) if is_secret_key(k) else _value_text(v, depth + 1)
+            if shown is None:
+                return None
+            items.append(f"{json.dumps(k, ensure_ascii=False)}: {shown}")
+        return "{" + ", ".join(items) + "}"
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# What is generic: the test's parameters (SYM-9)
+# --------------------------------------------------------------------------- #
+
+Params = Optional[frozenset]  # type: ignore[type-arg]
+"""The names of the test's parameters (``callspec.params``: parametrize and
+pytest-strategies arguments, parametrized fixtures), or ``None`` when they are
+not known (a Recorder used without the pytest plugin)."""
+
+
+def varies(node: ast.expr, params: Params) -> bool:
+    """Whether ``node`` is generic, so the procedure shows it as ``<expr>``: it
+    uses a test parameter (``channel``, ``channel * 100``, a local assigned from
+    one), a loop variable, or a parameter of a helper function. Everything else
+    (constants, other objects' attributes, fixtures, local variables that do not
+    come from a parameter, device reads) is the value of this run. A name that
+    says it is a secret stays generic. With ``params`` unknown, only named
+    constants (:func:`is_constant`) are not generic. Never raises."""
+    try:
+        if any(isinstance(n, ast.Name) and secret_name(n.id) for n in ast.walk(node)):
+            return True
+        if any(isinstance(n, ast.Attribute) and secret_name(n.attr) for n in ast.walk(node)):
+            return True
+        if params is None:
+            return not is_constant(node)
+        return _varies(node, params, _ALIAS_DEPTH)
+    except Exception:  # pragma: no cover - defensive: never break recording
+        return True
+
+
+def _varies(node: ast.expr, params: frozenset, depth: int) -> bool:  # type: ignore[type-arg]
+    if getattr(node, "parent", None) is None:
+        return True  # detached (a look-through substitution): the scopes are unknown
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and _name_varies(n, params, depth):
+            return True
+    return False
+
+
+def _name_varies(name: ast.Name, params: frozenset, depth: int) -> bool:  # type: ignore[type-arg]
+    scope: Any = getattr(name, "parent", None)
+    while scope is not None:
+        if isinstance(scope, _COMPREHENSIONS):
+            if name.id in _variables(scope):
+                return True  # a loop variable
+        elif isinstance(scope, _FUNCTIONS):
+            if name.id in _arguments(scope):
+                if name.id in params:
+                    return True
+                # The test's own other arguments are fixtures; a helper's are its inputs.
+                return not (isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and scope.name.startswith("test"))
+            if name.id in _globals(scope):
+                return False
+            if name.id in _variables(scope):
+                if depth <= 0:
+                    return True
+                value = _assigned(scope, name)
+                return True if value is None else _varies(value, params, depth - 1)
+        elif isinstance(scope, ast.Module):
+            return False
+        scope = getattr(scope, "parent", None)
+    return True
+
+
+def _arguments(fn: ast.AST) -> frozenset[str]:
+    a = fn.args  # type: ignore[attr-defined]
+    return frozenset(
+        arg.arg for arg in [*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg] if arg is not None
+    )
+
+
+def _globals(fn: ast.AST) -> frozenset[str]:
+    return frozenset(n for g in _scope_nodes(fn) if isinstance(g, ast.Global) for n in g.names)
+
+
+def _assigned(fn: ast.AST, name: ast.Name) -> Optional[ast.expr]:
+    """The value of the last plain ``name = <expr>`` before ``name``'s line in
+    ``fn``, or ``None`` when ``fn`` binds it another way too (a loop, ``with``,
+    ``+=``, unpacking) or there is none before it."""
+    best: Optional[ast.Assign] = None
+    for n in _scope_nodes(fn):
+        if (
+            isinstance(n, ast.Assign)
+            and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name)
+            and n.targets[0].id == name.id
+        ):
+            if n.lineno < name.lineno and (best is None or n.lineno > best.lineno):
+                best = n
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            continue
+        elif _rebinds(n, name.id) or (
+            isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.target.id == name.id
+        ):
+            return None
+    return None if best is None else best.value
 
 
 def _named(node: ast.expr) -> bool:

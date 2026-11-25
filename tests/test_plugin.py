@@ -161,10 +161,11 @@ def test_skip_modules_ini(pytester):
             stepdoc.record_action("width", "write", v, bridge_frames=0)
         """,
         test_skip="""
+        import pytest
         from driver import set_width
 
-        def test_it():
-            w = 5
+        @pytest.mark.parametrize("w", [5])
+        def test_it(w):
             set_width(w)
         """,
     )

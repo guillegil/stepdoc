@@ -27,6 +27,7 @@ import pytest
 
 from ..core.model import EACH_VALUES, Action, Check, Each, Location, Repeat, Section, Step
 from ..core.recorder import Recorder
+from ..core.symbolic import Params
 from ..core.symbolic import target_pattern
 from . import Adapter, Host
 from ._source import argument, calls_at, same_file, source_text, statement_span, symbolic
@@ -112,12 +113,15 @@ def _note(d: Mapping[str, Any]) -> Optional[str]:
     return note.strip() if isinstance(note, str) and note.strip() else None
 
 
-def to_check(d: Mapping[str, Any], root: str) -> Check:
-    """A verify check descriptor as a stepdoc Check."""
-    return _build(d, root)[0]
+def to_check(d: Mapping[str, Any], root: str, params: Params = None) -> Check:
+    """A verify check descriptor as a stepdoc Check. ``params``: the names of the
+    test's parameters, the only values the procedure keeps generic (SYM-9)."""
+    return _build(d, root, params)[0]
 
 
-def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]]:
+def _build(
+    d: Mapping[str, Any], root: str, params: Params = None
+) -> tuple[Check, Optional["_Wording"]]:
     description = str(d.get("description") or d.get("name") or d.get("check_type") or "check")
     text = description[len("Verify "):] if description.startswith("Verify ") else description
     passed = d.get("passed")
@@ -140,7 +144,7 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         if expected is not None:
             sym_rest = expected[1]
         else:
-            sym_rest = _symbolic_rest(d, rest, location, hint, spelled)
+            sym_rest = _symbolic_rest(d, rest, location, hint, spelled, params)
     operands = {k: v for k, v in (("actual", actual), ("expected", expected and expected[0])) if v}
     check = Check(
         text=text,
@@ -148,7 +152,7 @@ def _build(d: Mapping[str, Any], root: str) -> tuple[Check, Optional["_Wording"]
         expected=d.get("expected"),
         actual=d.get("actual"),
         detail=None if passed is True else (d.get("error") or d.get("detail")),
-        children=[to_check(c, root) for c in d.get("child_checks") or [] if isinstance(c, Mapping)],
+        children=[to_check(c, root, params) for c in d.get("child_checks") or [] if isinstance(c, Mapping)],
         selected=None if selected is None else str(selected),
         location=location,
         source=d,
@@ -457,14 +461,15 @@ def _symbolic_rest(
     loc: Optional[Location],
     hint: Optional[str] = None,
     spelled: Optional[str] = None,
+    params: Params = None,
 ) -> Optional[str]:
-    """The text after the name for the procedure when the expected value is a name
-    or an expression (``== <age>``); None when it is a literal (``rest`` already
-    reads right)."""
+    """The text after the name for the procedure when the expected value is
+    generic (``== <age>``); None when it is a literal or this run's value is
+    what the procedure shows (``rest`` already reads right)."""
     kind = str(d.get("check_type"))
     if loc is None or (kind != "between" and kind not in _COMPARISONS):
         return None
-    syms = _expected(loc.file, loc.line, kind, hint, spelled)
+    syms = _expected(loc.file, loc.line, kind, hint, spelled, params)
     if syms is None:
         return None
     units = f" {d['units']}" if d.get("units") else ""
@@ -483,21 +488,26 @@ def _symbolic_rest(
 
 @lru_cache(maxsize=4096)
 def _expected(
-    path: str, line: int, kind: str, hint: Optional[str] = None, spelled: Optional[str] = None
+    path: str,
+    line: int,
+    kind: str,
+    hint: Optional[str] = None,
+    spelled: Optional[str] = None,
+    params: Params = None,
 ) -> Optional[tuple[Optional[str], ...]]:
     """The expected value's ``<source>`` at a call site (``(low, high)`` for
-    ``between``), once per line; None when every one is a literal."""
+    ``between``), once per line; None when none is generic."""
     call = _call(path, line, _METHODS.get(kind, kind), hint, spelled)
     if call is None:
         return None
     if kind == "between":
         low, high = argument(call, 1, "low"), argument(call, 2, "high")
-        lo = symbolic(path, low) if low is not None else None
-        hi = symbolic(path, high) if high is not None else None
+        lo = symbolic(path, low, params, True) if low is not None else None
+        hi = symbolic(path, high, params, True) if high is not None else None
         return None if lo is None and hi is None else (lo, hi)
     _, position, keyword = _COMPARISONS[kind]
     node = argument(call, position, keyword)
-    sym = symbolic(path, node) if node is not None else None
+    sym = symbolic(path, node, params, True) if node is not None else None
     return None if sym is None else (sym,)
 
 
@@ -570,7 +580,7 @@ class _Placer:
         yield from range(self.cursor, len(self.paths))
 
     def place(self, d: Mapping[str, Any], section: Section) -> None:
-        check, wording = _build(d, self.root)
+        check, wording = _build(d, self.root, self.rec.params)
         if check.note is None:
             check.note_from_comment = True  # looked up when the recorder resolves
         anchors = [a for a in (check.location, _location(d.get("called_from"), self.root)) if a]

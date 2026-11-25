@@ -85,13 +85,19 @@ uv run pytest examples/quickstart --stepdoc-procedure=out/procedure.md --stepdoc
 3. **Symbolic values** come from the source: when an action is recorded, stepdoc
    finds the line of your test that caused it and later reads that expression
    with [`executing`](https://github.com/alexmojaki/executing). Literals stay
-   literal, names become `<name>`. A named constant is the same in every run, so
-   it shows its value: an upper-case name from the module or an import
-   (`MY_CONST`, `consts.LIMIT`, `Mode.FAST`, also `MY_CONST + 1`) reads `100`,
-   while a parameter, fixture or local variable keeps its `<name>`, even in upper
-   case. A lower-case module variable (`limit = 7`) is not a constant, and a
-   constant whose name says it is a secret (`API_TOKEN`, `PASSWORD`) keeps its
-   `<name>`. Targets keep their variable parts too:
+   literal. Only what varies between the test's cases is generic: a value that
+   comes from a test parameter (`@pytest.mark.parametrize`, a pytest-strategies
+   strategy, a parametrized fixture) reads `<name>` (`<channel>`, `<channel *
+   100>`, `<offset>` after `offset = channel - 2`), and so do loop variables and
+   a helper function's own parameters. Every other value is shown as this run
+   has it: constants (`MY_CONST`, `consts.LIMIT`), local variables (`width =
+   50`), other objects' attributes (`bench.level`), fixtures and device reads
+   (`== 100`, `= 50`). A value whose name says it is a secret (`API_TOKEN`,
+   `password`) keeps its `<name>`, and so does a value that is not made of
+   numbers, strings, bools and None (in lists, tuples and dicts too). Without the
+   pytest plugin (a `Recorder` used directly) the parameters are not known, and
+   only upper-case module constants show their value. Targets keep their
+   variable parts too:
    after `reg = getattr(tb.dut.block, f"reg{ch}")`, `reg.value = val` reads
    `dut.block.reg<ch>.value = <val>` (also `tb.dut.regs[i]` → `regs[<i>]`), so every
    parametrized run shares one procedure. This applies to actions recorded with
@@ -415,9 +421,10 @@ the plugin already publishes:
   otherwise the argument's source (`Verify write_count == 500`). A check made
   without `name=` reads like that; with one, the name comes first:
   `Verify 'FIFO not full': dev.block.esmi<channel>_ctl.tx == 0`. An expected
-  value shows as for actions: `== <expected>` for a variable, the value for a
-  literal or a named constant (`verify.equal(reg.PULSE_WIDTH, MY_CONST)` reads
-  `Verify dev.map.pulse.pulse<channel>.PULSE_WIDTH == 100`). A literal
+  value shows as for actions: `== <channel>` for a test parameter, this run's
+  value for anything else (`verify.equal(reg.PULSE_WIDTH, MY_CONST)` reads
+  `Verify dev.map.pulse.pulse<channel>.PULSE_WIDTH == 100`). An
+  `expected_name=` given to the check keeps its name. A literal
   checked value keeps the old form (`Verify 'HTTP status' == 201`). The
   check's `note=` is shown after it in parentheses.
 

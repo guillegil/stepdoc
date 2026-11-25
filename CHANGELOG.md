@@ -3,19 +3,22 @@
 ## Unreleased
 
 ### Changed
-- Named constants show their value in the procedure (SYM-9). A constant is the
-  same in every run, so `verify.equal(reg.PULSE_WIDTH, MY_CONST)` now reads
-  `Verify dev.map.pulse.pulse<channel>.PULSE_WIDTH == 100`, not `== <MY_CONST>`,
-  and `dev.map.pulse.width = MY_CONST` reads `= 100`. A constant is an upper-case
-  name that the test's module defines or imports (`MY_CONST`, `LIMIT` from
-  `from consts import LIMIT`), an upper-case attribute of a module or class
-  (`consts.LIMIT`, `Cfg.MAX`, `Mode.FAST`), or arithmetic of those and numbers
-  (`MY_CONST + 1`). Parameters, fixtures and local variables keep their
-  `<name>`, also in upper case (`cfg.MAX` where `cfg` is a fixture), and so do
-  lower-case module variables, expressions mixing a constant with a variable
-  (`<MY_CONST * channel>`) and constants named like secrets (`<API_TOKEN>`). An
-  action shows a constant's value when it is a number, string, bool or None. The
-  report does not change; pytest-reporter's This run view shows `== 100`.
+- Only test parameters stay generic in the procedure (SYM-9). A value that
+  comes from a test parameter (`@pytest.mark.parametrize`, a pytest-strategies
+  strategy, a parametrized fixture: the names in `callspec.params`), directly
+  or through a local variable assigned from one (`offset = channel - 2`), still
+  reads `<name>`, and so do loop variables and a helper function's own
+  parameters. Every other value now shows as this run has it, in actions'
+  values and in pytest-verifier's expected values and `between` bounds:
+  constants (`verify.equal(reg.PULSE_WIDTH, MY_CONST)` reads `Verify
+  dev.map.pulse.pulse<channel>.PULSE_WIDTH == 100`, not `== <MY_CONST>`),
+  local variables (`width = 50`), other objects' attributes (`bench.level`),
+  fixtures and device reads. Values named like secrets (`<API_TOKEN>`), values
+  that are not numbers, strings, bools or None (also inside lists, tuples and
+  dicts), and an `expected_name=` given to a check keep their name. A
+  `Recorder` used without the pytest plugin does not know the parameters: there
+  only upper-case module constants show their value. Targets (`reg<ch>`) are
+  unchanged. The report does not change.
 - Faster pytest-verifier checks in large tests and large test files. A step that
   makes many checks placed each one after scanning every check placed before it,
   so a test with 8,000 checks in one step spent 2.6 s there; it now takes 0.2 s

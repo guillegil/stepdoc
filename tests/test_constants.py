@@ -119,3 +119,78 @@ def test_what_counts_as_a_constant(text, constant):
 
 def test_a_node_without_parent_links_is_not_a_constant():
     assert is_constant(ast.parse("MY_CONST", mode="eval").body) is False
+
+
+DEVICE = '''
+import stepdoc
+
+
+class Regs:
+    def __setattr__(self, name, value):
+        stepdoc.record_action(f"dev.{name}", "write", value)
+'''
+
+TESTS = '''
+import pytest
+import regs
+from stepdoc import step
+
+GAIN = 2
+
+
+class Bench:
+    level = 7
+
+
+@pytest.fixture
+def dev():
+    return regs.Regs()
+
+
+@pytest.fixture(params=[4])
+def lanes(request):
+    return request.param
+
+
+def configure(dev, code):
+    dev.code = code
+
+
+@pytest.mark.parametrize("channel", [3])
+def test_writes(dev, channel, lanes):
+    width = 50
+    period = width * channel
+    bench = Bench()
+    with step("Configure"):
+        dev.width = width
+        dev.period = period
+        dev.level = bench.level
+        dev.gain = GAIN * 2
+        dev.lanes = lanes
+        dev.mode = {"lanes": width, "on": True}
+        dev.name = f"ch{channel}"
+        configure(dev, width)
+        for i in [1]:
+            dev.index = i
+'''
+
+
+def test_only_parameters_stay_generic_in_written_values(pytester):
+    """SYM-9 with the pytest plugin: it knows the test's parameters."""
+    pytester.makepyfile(regs=DEVICE, test_writes=TESTS)
+    pytester.makeini("[pytest]\nstepdoc_skip_modules = regs\n")
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "--stepdoc-procedure=procedure.txt")
+    result.assert_outcomes(passed=1)
+    text = (pytester.path / "procedure.txt").read_text(encoding="utf-8")
+    lines = [line.strip() for line in text.splitlines() if re.match(r"\s+\d", line)]
+    assert lines == [
+        "1.1. dev.width = 50",
+        "1.2. dev.period = <period>",
+        "1.3. dev.level = 7",
+        "1.4. dev.gain = 4",
+        "1.5. dev.lanes = <lanes>",
+        '1.6. dev.mode = {"lanes": 50, "on": True}',
+        '1.7. dev.name = "ch<channel>"',
+        "1.8. dev.code = <code>",
+        "1.9. dev.index = <i>",
+    ]

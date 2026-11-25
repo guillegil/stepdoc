@@ -11,7 +11,7 @@ from typing import Optional
 
 import executing
 
-from ..core.symbolic import is_constant, secret_name
+from ..core.symbolic import Params, varies
 
 
 @lru_cache(maxsize=256)
@@ -141,17 +141,17 @@ def source_text(path: str, node: ast.expr) -> Optional[str]:
     return " ".join(source.split()) if source else None
 
 
-def symbolic(path: str, node: ast.expr) -> Optional[str]:
-    """``<source>`` for an expression that is not a literal, None for a literal
-    and for a named constant (``MY_CONST``, ``consts.LIMIT``: the same in every
-    run, so the procedure shows its value, SYM-9), unless its name says it is a
-    secret."""
+def symbolic(path: str, node: ast.expr, params: Params = None, values: bool = False) -> Optional[str]:
+    """``<source>`` for an expression that is not a literal, None for a literal.
+    With ``values`` (an expected value), also None for an expression that is not
+    generic (:func:`stepdoc.core.symbolic.varies`: it does not come from a test
+    parameter), whose value this run's text already shows (SYM-9)."""
     try:
         ast.literal_eval(node)
         return None
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         pass
-    if is_constant(node) and not secret_name(ast.unparse(node)):
+    if values and not varies(node, params):
         return None
     text = _text(path)
     source = ast.get_source_segment(text, node) if text is not None else None
