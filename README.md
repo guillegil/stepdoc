@@ -381,6 +381,7 @@ enable_assertion_pass_hook = true
 | `--stepdoc-record=PATH` | Write the JSON run record (schema: `src/stepdoc/schema/run-record.schema.json`) |
 | `--stepdoc-procedure=PATH` | Write the procedure. The extension picks the format: `.md`, `.html` (one self-contained file) or `.txt` |
 | `--stepdoc-report=PATH` | Write the executed report, same formats |
+| `--stepdoc-generic=PATH` | Write the generic procedure as JSON, one entry per test (see [The generic procedure as JSON](#the-generic-procedure-as-json)) |
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
 | `stepdoc_skip_modules` (ini) | Module prefixes skipped when looking for your source line |
 | `stepdoc_collapse_repeats` (ini) | Collapse polling, repeated writes and loops into one entry (default `true`) |
@@ -495,6 +496,58 @@ without importing stepdoc, through the `pytest_stepdoc_step_started`,
 docstring, once before it runs) and `pytest_stepdoc_record_ready` hooks
 (implement them with `@pytest.hookimpl(optionalhook=True)`).
 
+## The generic procedure as JSON
+
+`--stepdoc-generic=out/step-generic.json` writes the procedure for other tools
+to read: one entry per test, however many cases it ran. The cases of a
+parametrized test, or the vectors a pytest-strategies strategy generated, share
+one entry, and no entry holds a result. The text of every line is the
+procedure's (`<level>` for a parameter); schema:
+`src/stepdoc/schema/generic.schema.json`.
+
+```json
+{
+  "$schema": "urn:stepdoc:schema:generic:1.0",
+  "schema_version": "1.0",
+  "tests": [
+    {
+      "test_id": "tests/test_dac.py::TestDac::test_levels",
+      "test_name": "test_levels",
+      "test_file": "test_dac.py",
+      "test_path": "tests/test_dac.py",
+      "parameters": [{"name": "level", "description": null, "values": ["10", "20", "30"]}],
+      "cases": 3,
+      "steps": [
+        {"kind": "step", "number": "S1", "section": "setup", "text": "Power on", "steps": [
+          {"kind": "action", "number": "S1.1", "section": "setup",
+           "text": "pwr.en = 1", "code": "pwr.en = 1"}
+        ]},
+        {"kind": "step", "number": "1", "section": "procedure", "text": "Set level", "steps": [
+          {"kind": "action", "number": "1.1", "section": "procedure",
+           "text": "dac.level = <level>", "code": "dac.level = <level>"},
+          {"kind": "check", "number": "1.2", "section": "procedure",
+           "text": "Verify dev.read(\"dac.level\") == level", "verb": "Verify",
+           "code": "dev.read(\"dac.level\") == level"}
+        ]}
+      ]
+    }
+  ]
+}
+```
+
+- `test_path` is the file's path from the pytest root, `test_file` its name and
+  `test_id` the node ID without the parameter ID.
+- `steps` holds every section in order (`precondition`, `setup`, `procedure`,
+  `teardown`, in each node's `section`); a step's entries are its `steps`. An
+  action or check outside any step has `number` null.
+- A node may also have `label` (a named check's name), `result` (a read bound to
+  a name, `<rdata>`), `note` (a step's `note=`, a check's note) and
+  `applied_in` (a pre-condition a shared fixture applied for an earlier test).
+- `doc` (the docstring), `parameters` and `strategy` appear when the test has them.
+- When cases took different paths (an `if` on a parameter), `variants` lists
+  each path of the procedure section with the parameter IDs that took it;
+  `steps` holds the first.
+
 ## Rendering a saved record
 
 `stepdoc render` turns a run record into documents again, without running the
@@ -502,6 +555,7 @@ tests or needing pytest installed:
 
 ```bash
 stepdoc render out/run.json --procedure procedure.html --report report.md
+stepdoc render out/run.json --generic step-generic.json
 stepdoc render out/run.json                          # procedure as Markdown on stdout
 stepdoc render out/run.json --doc report --format text
 ```

@@ -25,6 +25,7 @@ from .core.record import case_record, dumps, run_record
 from .core.recorder import Recorder, _perf, _renumber, current_recorder, is_dry_run
 from .core.symbolic import set_skip_modules
 from .renderers import format_for_path, render
+from .renderers.generic import render_generic
 
 _state_key = pytest.StashKey["_State"]()
 _recorder_key = pytest.StashKey[Recorder]()
@@ -41,8 +42,11 @@ class _State:
         self.record_path: Optional[str] = opt.stepdoc_record
         self.procedure_path: Optional[str] = opt.stepdoc_procedure
         self.report_path: Optional[str] = opt.stepdoc_report
+        self.generic_path: Optional[str] = opt.stepdoc_generic
         self.dry_run: bool = opt.stepdoc_dry_run
-        self.active = bool(self.record_path or self.procedure_path or self.report_path or self.dry_run)
+        self.active = bool(
+            self.record_path or self.procedure_path or self.report_path or self.generic_path or self.dry_run
+        )
         self.root = str(config.rootpath)
         self.collapse_repeats: bool = config.getini("stepdoc_collapse_repeats")
         self.comment_notes: bool = config.getini("stepdoc_comment_notes")
@@ -71,6 +75,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help="write the procedure with symbolic values (.md, .html or .txt)")
     group.addoption("--stepdoc-report", metavar="PATH", default=None,
                     help="write the executed report with concrete values (.md, .html or .txt)")
+    group.addoption("--stepdoc-generic", metavar="PATH", default=None,
+                    help="write the generic procedure as JSON, one entry per test (all its cases in one)")
     group.addoption("--stepdoc-dry-run", action="store_true", default=False,
                     help="collect the procedure without judging results; "
                          "tests can switch to simulated backends via the stepdoc_dry_run fixture")
@@ -448,6 +454,8 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     if state.report_path:
         fmt = format_for_path(state.report_path)
         written.append(_write(state.report_path, render(record, "report", fmt)))
+    if state.generic_path:
+        written.append(_write(state.generic_path, render_generic(record)))
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         for path in written:

@@ -285,12 +285,17 @@ def test_lines(test: Record, symbolic: bool, sections: tuple[str, ...] = SECTION
 def plain(line: Line) -> str:
     """A line as plain text, without status marks or notes."""
     head = f"{line.number}. " if line.number else ("- " if not line.is_step else "")
+    return "   " * line.depth + head + line_body(line)
+
+
+def line_body(line: Line) -> str:
+    """A line's text without its number, indent, status mark or notes."""
     body = " ".join(p for p in (line.verb, line.label, line.code) if p)
     if line.aside:
         body += f" ({' '.join(line.aside.split())})"
     if line.result:
         body += f" -> {line.result}"
-    return "   " * line.depth + head + body
+    return body
 
 
 def remark_lines(line: Line) -> list[str]:
