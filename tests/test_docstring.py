@@ -309,7 +309,7 @@ def test_plugin_records_doc_and_calls_hook(pytester):
     result.assert_outcomes(passed=4)
     record = json.loads((pytester.path / "run.json").read_text())
     jsonschema.validate(record, SCHEMA)
-    assert record["schema_version"] == "0.5"
+    assert record["schema_version"] == "0.6"
     docs = {t["id"]: t.get("doc") for t in record["tests"]}
     doc = {"description": "Fill the FIFO.", "objective": "Show it.", "acceptance": "- It fills."}
     assert docs == {
@@ -424,6 +424,6 @@ def test_records_without_doc_render_as_before(doc, fmt, tmp_path, capsys):
 def test_cli_renders_doc(tmp_path, capsys):
     path = tmp_path / "run.json"
     path.write_text(json.dumps(documented_run(EXAMPLE_DOC)))
-    assert load(path)["schema_version"] == "0.5"
+    assert load(path)["schema_version"] == "0.6"
     assert main(["render", str(path)]) == 0
     assert "**Objective.** Confirm" in capsys.readouterr().out

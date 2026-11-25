@@ -661,6 +661,9 @@ def _unjudge(c: Check) -> None:
     c.passed = None
     for child in c.children:
         _unjudge(child)
+    for branch in c.branches or ():
+        if branch.check is not None:
+            _unjudge(branch.check)
 
 
 def _assert_text(exc: AssertionError) -> str:

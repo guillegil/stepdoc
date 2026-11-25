@@ -385,7 +385,7 @@ enable_assertion_pass_hook = true
 | Option | Purpose |
 |---|---|
 | `--stepdoc-record=PATH` | Write the JSON run record (schema: `src/stepdoc/schema/run-record.schema.json`) |
-| `--stepdoc-procedure=PATH` | Write the procedure. The extension picks the format: `.md`, `.html` (one self-contained file) or `.txt` |
+| `--stepdoc-procedure=PATH` | Write the procedure. The extension picks the format: `.md`, `.html` (one self-contained file), `.txt` or `.tex` (see [LaTeX](#latex)) |
 | `--stepdoc-report=PATH` | Write the executed report, same formats |
 | `--stepdoc-generic=PATH` | Write the generic procedure as JSON, one entry per test (see [The generic procedure as JSON](#the-generic-procedure-as-json)) |
 | `--stepdoc-dry-run` | Collect the procedure without judging: assertion failures inside steps are recorded and skipped so later steps are still documented |
@@ -487,6 +487,14 @@ the plugin already publishes:
   `failed`, `item`, `items` and the `values` the items' checks got, at most the
   first and last 32) and its `children` are the failed items, each with its
   `index`.
+- **pytest-verifier's `verify.guard`** (an if/elif/else chain of checks): the
+  run record keeps every branch of the chain (`branches`: each with its
+  `label`, its `condition` as written in the call, whether it `holds` in this
+  run, whether it was `taken`, and its `check`; the `default` comes last). A
+  lazy check (`lambda: verify.equal(...)`) is only built when its branch is
+  taken, so a branch that was not taken keeps the check's `source` instead. The
+  LaTeX documents list the branches (see [LaTeX](#latex)); the other formats
+  show the guard as one line, as before.
 - **pytest-strategies**: the report shows each case's seed and the row it ran
   (`directed: youngest`), and the procedure's parameter table shows what each
   argument draws from (`integer 0 … 120`) instead of the sampled values.
@@ -554,6 +562,69 @@ procedure's (`<level>` for a parameter); schema:
 - When cases took different paths (an `if` on a parameter), `variants` lists
   each path of the procedure section with the parameter IDs that took it;
   `steps` holds the first.
+
+## LaTeX
+
+A `.tex` procedure or report is a LaTeX fragment, not a whole document: it
+loads no packages and has no `\documentclass`, so you `\input` it into your
+own test specification and it takes that document's fonts and layout.
+
+```bash
+pytest --stepdoc-procedure=out/procedure.tex --stepdoc-report=out/report.tex
+stepdoc render out/run.json --procedure procedure.tex   # from a saved record
+```
+
+```latex
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage{xcolor}   % optional: steps not taken in grey, not italic
+\usepackage{amssymb}  % optional: a check mark for passed, not the word "pass"
+\begin{document}
+\input{out/procedure.tex}
+\end{document}
+```
+
+Steps are an `enumerate` that keeps stepdoc's numbers as the labels (`1.`,
+`1.2.`, `S1.`), code is set in `\texttt`. Every style is a
+`\providecommand` at the top of the file, so defining one before the `\input`
+changes it: `\stepdocTitle` and `\stepdocTest` (the headings, `\section*` and
+`\subsection*`), `\stepdocSection`, `\stepdocCode`, `\stepdocMeta`,
+`\stepdocNote`, `\stepdocTaken`, `\stepdocNotRun`, `\stepdocPass`,
+`\stepdocFail`, `\stepdocUnknown`, `\stepdocNotJudged`. For example
+`\newcommand{\stepdocTitle}[1]{}` drops the title.
+
+A guarded check (pytest-verifier's `verify.guard`) is one item with its
+branches under it. The procedure lists every branch, with the test parameters
+generic, as everywhere in the procedure:
+
+```python
+verify.guard(
+    [
+        (mode == "fast", "fast mode", lambda: verify.greater_equal(speed, 100, name="Speed")),
+        (mode == "slow", "slow mode", lambda: verify.greater_equal(speed, 50, name="Speed")),
+    ],
+    default=lambda: verify.equal(speed, 40, name="Speed"),
+    name="Speed for the mode",
+)
+```
+
+> 1.1. Verify ‘Speed for the mode’, depending on the condition:
+> - If `mode == "fast"` (fast mode): Verify ‘Speed’: `speed >= 100`
+> - Else if `mode == "slow"` (slow mode): Verify ‘Speed’: `speed >= 50`
+> - Otherwise: Verify ‘Speed’: `speed == 40`
+
+The report sets the branch the run took in bold, with its result, and greys
+out the others, `(condition false)` before it and `(not evaluated)` after it:
+
+> 1.1. Verify ‘Speed for the mode’, depending on the condition: ✗
+> - ~~If `mode == "fast"` (fast mode): Verify ‘Speed’: `speed >= 100` (condition false)~~
+> - **Else if `mode == "slow"` (slow mode): Verify ‘Speed’: `speed >= 50`** → `got 40` ✗
+> - ~~Otherwise: Verify ‘Speed’: `speed == 40` (not evaluated)~~
+
+(grey text, shown struck out here). The condition is read from the
+`verify.guard(...)` call when its branches are written in it as a list of
+tuples; otherwise a branch is named by its label (`If fast mode:`). A lazy
+check that no case built shows as the call that would build it.
 
 ## Rendering a saved record
 

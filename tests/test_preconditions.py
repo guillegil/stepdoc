@@ -927,7 +927,7 @@ def make_run():
 def test_record_validates_and_carries_section_and_applied_in():
     record = make_run()
     jsonschema.validate(record, SCHEMA)
-    assert record["schema_version"] == "0.5"
+    assert record["schema_version"] == "0.6"
     json.dumps(record)
     applied, established, broken = record["tests"]
 

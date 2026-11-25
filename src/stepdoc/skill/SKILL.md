@@ -149,7 +149,7 @@ stepdoc render out/run.json --procedure procedure.html          # again, without
 pytest --stepdoc-generic=out/step-generic.json                  # generic procedure as JSON, one entry per test
 ```
 
-The file extension picks the format: `.md`, `.html` or `.txt`.
+The file extension picks the format: `.md`, `.html`, `.txt` or `.tex` (a LaTeX fragment to `\input`).
 
 **After writing or changing a test, generate the procedure and read it.** Check that:
 
