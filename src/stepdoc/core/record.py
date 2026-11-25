@@ -18,12 +18,12 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Iterable, Optional, Union
 
-from .model import Action, Check, Each, Location, Loop, Repeat, Step
+from .model import Action, Branch, Check, Each, Location, Loop, Repeat, Step
 from .recorder import Recorder
 
-SCHEMA_ID = "urn:stepdoc:schema:run-record:0.5"  # no published URL yet
-SCHEMA_VERSION = "0.5"
-READABLE_VERSIONS = ("0.1", "0.2", "0.3", "0.4", "0.5")
+SCHEMA_ID = "urn:stepdoc:schema:run-record:0.6"  # no published URL yet
+SCHEMA_VERSION = "0.6"
+READABLE_VERSIONS = ("0.1", "0.2", "0.3", "0.4", "0.5", "0.6")
 """Each version only adds fields; renderers read older records too."""
 
 
@@ -122,6 +122,19 @@ def _check(c: Check, ctx: _Ctx) -> dict[str, Any]:
         **({} if c.operands is None else {"operands": c.operands}),
         **({} if c.each is None else {"each": _each(c.each)}),
         **({} if c.index is None else {"index": c.index}),
+        **({} if c.branches is None else {"branches": [_branch(b, ctx) for b in c.branches]}),
+    }
+
+
+def _branch(b: Branch, ctx: _Ctx) -> dict[str, Any]:
+    return {
+        "label": b.label,
+        "condition": b.condition,
+        "holds": b.holds,
+        "taken": b.taken,
+        "default": b.default,
+        "check": None if b.check is None else _check(b.check, ctx),
+        **({} if b.source is None else {"source": b.source}),
     }
 
 

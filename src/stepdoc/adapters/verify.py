@@ -25,7 +25,7 @@ from typing import Any, Iterator, Mapping, Optional, Sequence
 
 import pytest
 
-from ..core.model import EACH_VALUES, Action, Check, Each, Location, Repeat, Section, Step
+from ..core.model import EACH_VALUES, Action, Branch, Check, Each, Location, Repeat, Section, Step
 from ..core.recorder import Recorder
 from ..core.symbolic import Params
 from ..core.symbolic import target_pattern
@@ -177,7 +177,90 @@ def _build(
             check.label = name
     if kind == "all_satisfy":
         _fold_each(check, d)
+    if kind == "guard":
+        check.branches = _branches(d, root, params, location)
     return check, wording
+
+
+def _branches(
+    d: Mapping[str, Any], root: str, params: Params, location: Optional[Location]
+) -> Optional[list[Branch]]:
+    """Every branch of a ``guard`` (CHK-12), in order, the default last: its label,
+    whether this run took it, its check when it was built, and, from the call's
+    source, the condition as written and the code of a check that was not built
+    (a lazy one, called only when its branch is taken). None when the record has
+    no list of branches."""
+    raw = d.get("branches")
+    if not isinstance(raw, list):
+        return None
+    matched = d.get("matched_index")
+    matched = matched if isinstance(matched, int) and not isinstance(matched, bool) else None
+    conditions, sources, default_source = _guard_source(location, len(raw))
+    out: list[Branch] = []
+    for i, b in enumerate(raw):
+        b = b if isinstance(b, Mapping) else {}
+        child = b.get("check")
+        holds, label = b.get("condition"), b.get("label")
+        out.append(
+            Branch(
+                label=None if label is None else _line(label if isinstance(label, str) else str(label)),
+                condition=conditions[i],
+                holds=holds if isinstance(holds, bool) else None,
+                taken=i == matched,
+                check=to_check(child, root, params) if isinstance(child, Mapping) else None,
+                source=None if isinstance(child, Mapping) else sources[i],
+            )
+        )
+    default = d.get("default")
+    if isinstance(default, Mapping) or default_source is not None:
+        built = isinstance(default, Mapping)
+        out.append(
+            Branch(
+                label=None,
+                taken=matched is None and built and d.get("error") is None,
+                default=True,
+                check=to_check(default, root, params) if isinstance(default, Mapping) else None,
+                source=None if built else default_source,
+            )
+        )
+    return out
+
+
+def _guard_source(
+    location: Optional[Location], count: int
+) -> tuple[list[Optional[str]], list[Optional[str]], Optional[str]]:
+    """From the ``guard(...)`` call at ``location``: each branch's condition and
+    check as written, and the default's check. A lambda stands for its body
+    (``lambda: mode == "fast"`` reads ``mode == "fast"``). Nothing when the source
+    cannot be read, the call is not alone on its line, or its branches are not
+    written out as a list of ``(condition, label, check)`` tuples, one per branch."""
+    none: list[Optional[str]] = [None] * count
+    if location is None:
+        return none, list(none), None
+    calls = calls_at(location.file, location.line, "guard")
+    if len(calls) != 1:
+        return none, list(none), None
+    call = calls[0]
+    path = location.file
+    default = next((kw.value for kw in call.keywords if kw.arg == "default"), None)
+    default_text = _code_of(path, default)
+    node = argument(call, 0, "branches")
+    if not isinstance(node, (ast.List, ast.Tuple)) or len(node.elts) != count:
+        return none, list(none), default_text
+    if not all(isinstance(e, ast.Tuple) and len(e.elts) == 3 for e in node.elts):
+        return none, list(none), default_text
+    conditions = [_code_of(path, e.elts[0]) for e in node.elts]  # type: ignore[attr-defined]
+    checks = [_code_of(path, e.elts[2]) for e in node.elts]  # type: ignore[attr-defined]
+    return conditions, checks, default_text
+
+
+def _code_of(path: str, node: Optional[ast.expr]) -> Optional[str]:
+    """An expression's source on one line; a lambda without parameters as its body."""
+    if node is None or (isinstance(node, ast.Constant) and node.value is None):
+        return None
+    if isinstance(node, ast.Lambda) and not node.args.args and not node.args.vararg:
+        node = node.body
+    return source_text(path, node)
 
 
 def _fold_each(check: Check, d: Mapping[str, Any]) -> None:

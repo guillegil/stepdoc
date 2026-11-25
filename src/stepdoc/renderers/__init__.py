@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, Literal
 
-from . import html, markdown, text
+from . import html, latex, markdown, text
 
 Doc = Literal["procedure", "report"]
 Renderer = Callable[[dict[str, Any]], str]
@@ -15,9 +15,10 @@ FORMATS: dict[str, dict[str, Renderer]] = {
     "md": {"procedure": markdown.render_procedure, "report": markdown.render_report},
     "html": {"procedure": html.render_procedure, "report": html.render_report},
     "text": {"procedure": text.render_procedure, "report": text.render_report},
+    "tex": {"procedure": latex.render_procedure, "report": latex.render_report},
 }
 
-_EXTENSIONS = {".md": "md", ".markdown": "md", ".html": "html", ".htm": "html", ".txt": "text"}
+_EXTENSIONS = {".md": "md", ".markdown": "md", ".html": "html", ".htm": "html", ".txt": "text", ".tex": "tex", ".latex": "tex"}
 
 
 def format_for_path(path: str, default: str = "md") -> str:

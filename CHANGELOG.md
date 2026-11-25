@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added
+- LaTeX procedure and report (OUT-8). A `.tex` path for `--stepdoc-procedure`
+  or `--stepdoc-report` (and `stepdoc render`, `--format tex`) writes a LaTeX
+  fragment to `\input` into any document: no `\documentclass` and no
+  packages, steps as an `enumerate` labelled with stepdoc's numbers, code in
+  `\texttt`, and every style a `\providecommand` (`\stepdocTest`,
+  `\stepdocCode`, `\stepdocTaken`, `\stepdocNotRun`…) that a document can
+  define first. Grey needs `xcolor` (italic without it), a check mark
+  `amssymb` (the word "pass" without it). Tested with pdfLaTeX and LuaLaTeX.
+- Guarded checks list their branches (CHK-12). pytest-verifier's `verify.guard`
+  is one item, `Verify 'Speed for the mode', depending on the condition:`,
+  with one sub-item per branch: `If mode == "fast" (fast mode): Verify 'Speed':
+  speed >= 100`, `Else if ...`, `Otherwise: ...`. The procedure lists every
+  branch once, whichever branch each case took (a lazy check built in another
+  case gives its generic text; test parameters stay `<name>`); the report sets
+  the taken branch in bold with its result and greys out the others
+  (`condition false`, `not evaluated`). Conditions and the source of lazy
+  checks that were not built come from the `verify.guard(...)` call. In the
+  LaTeX documents only; Markdown, HTML and text show a guard as before.
+- Run record schema 0.6: a check may have `branches` (`label`, `condition`,
+  `holds`, `taken`, `default`, `check`, and `source` for a check that was not
+  built).
+
 ### Changed
 - Only test parameters stay generic in the procedure (SYM-9). A value that
   comes from a test parameter (`@pytest.mark.parametrize`, a pytest-strategies

@@ -127,6 +127,22 @@ verify.all_satisfy(waveforms, lambda w: verify.equal(w & INDEX_ERROR_BIT, 0), na
 - Leave `name=` off the item's check: the line uses the `all_satisfy`'s name.
 - Items checked differently (other check type, name or expression) stay one line each.
 
+## Checks that depend on a condition: `verify.guard`
+
+```python
+verify.guard(
+    [(mode == "fast", "fast mode", lambda: verify.greater_equal(speed, 100, name="Speed")),
+     (mode == "slow", "slow mode", lambda: verify.greater_equal(speed, 50, name="Speed"))],
+    default=lambda: verify.equal(speed, 40, name="Speed"),
+    name="Speed for the mode",
+)
+```
+
+- Write the branches as a list of `(condition, label, check)` tuples in the call:
+  the LaTeX documents read each condition from there (`If mode == "fast" (fast mode): ...`).
+  Branches built elsewhere are named by their labels only.
+- The LaTeX procedure lists every branch; the report bolds the one taken.
+
 ## step(check=...)
 
 `step(title, check=value)` records a one-line step holding one check. It is not a

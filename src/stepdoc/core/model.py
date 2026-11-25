@@ -151,6 +151,30 @@ EACH_VALUES = 64
 
 
 @dataclass
+class Branch:
+    """One branch of a guarded check (pytest-verifier's ``guard``): an if/elif/else
+    chain, of which the first branch whose condition holds is checked (CHK-12)."""
+
+    label: Optional[str]
+    """The name the test gave the branch (``"fast mode"``); None for the default."""
+    condition: Optional[str] = None
+    """The condition's source, as written (``mode == "fast"``), when it was found."""
+    holds: Optional[bool] = None
+    """The condition's truth in this run; None when it was not evaluated (an
+    earlier branch was taken) or for the default."""
+    taken: bool = False
+    """Whether this run checked this branch."""
+    default: bool = False
+    """The ``default=`` branch, checked when no condition holds."""
+    check: Optional["Check"] = None
+    """The branch's check, when it was built (a lazy check is built only when its
+    branch is taken)."""
+    source: Optional[str] = None
+    """The source of a check that was not built (``verify.equal(speed, 40,
+    name="Speed")``), so the procedure can still say what the branch checks."""
+
+
+@dataclass
 class Check:
     text: str
     passed: Optional[bool]
@@ -192,6 +216,9 @@ class Check:
     (CHK-11): ``children`` then holds only the items that failed."""
     index: Optional[int] = None
     """For a child of a folded check: the item's position, from 0."""
+    branches: Optional[list[Branch]] = None
+    """Set on a guarded check (CHK-12): every branch of its if/elif/else chain, in
+    order, the default last."""
     note_from_comment: bool = field(default=False, repr=False, compare=False)
     """Look up ``note`` from a source comment when the recorder resolves (asserts
     and adapters' checks set it; ``stepdoc_comment_notes = false`` turns it off)."""
