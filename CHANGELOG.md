@@ -11,19 +11,25 @@
   `\stepdocCode`, `\stepdocTaken`, `\stepdocNotRun`…) that a document can
   define first. Grey needs `xcolor` (italic without it), a check mark
   `amssymb` (the word "pass" without it). Tested with pdfLaTeX and LuaLaTeX.
-- Guarded checks list their branches (CHK-12). pytest-verifier's `verify.guard`
-  is one item, `Verify 'Speed for the mode', depending on the condition:`,
-  with one sub-item per branch: `If mode == "fast" (fast mode): Verify 'Speed':
-  speed >= 100`, `Else if ...`, `Otherwise: ...`. The procedure lists every
-  branch once, whichever branch each case took (a lazy check built in another
-  case gives its generic text; test parameters stay `<name>`); the report sets
-  the taken branch in bold with its result and greys out the others
-  (`condition false`, `not evaluated`). Conditions and the source of lazy
-  checks that were not built come from the `verify.guard(...)` call. In the
-  LaTeX documents only; Markdown, HTML and text show a guard as before.
+- Guarded checks list every branch (CHK-12). pytest-verifier's `verify.guard`
+  reads `Verify 'Speed for the mode', depending on the condition:`, with one
+  line per branch, the default last: `If mode == "fast" (fast mode): Verify
+  'Speed': speed >= <limit>`, `Else if ...`, `Otherwise: ...`, in Markdown,
+  HTML, text, LaTeX and the generic JSON (`branches`). The adapter reads every
+  branch from the `verify.guard(...)` call, not just the one taken: the
+  condition as written, and the check worded from its source like a built one
+  (test parameters as `<name>`), also for a lazy check that was never built.
+  The procedure lists every branch the same way in every case, so cases that
+  took different branches share one procedure (before, each branch taken was a
+  variant, `Verify 'Speed for the mode' [guarded] [→ fast mode]`). The report
+  gives the taken branch its result and mark and says of the others `condition
+  false` or `not evaluated` (grey in HTML and LaTeX; bold for the taken one in
+  LaTeX).
 - Run record schema 0.6: a check may have `branches` (`label`, `condition`,
-  `holds`, `taken`, `default`, `check`, and `source` for a check that was not
-  built).
+  `holds`, `taken`, `default`, `check`, `source` for a check that was not
+  built, and `wording`, the check as its source words it). Generic procedure
+  JSON: a node may have `branches` (`if`, `condition`, `branch_label`, and the
+  check's `text`, `verb`, `label`, `code`, or its `source`).
 
 ### Changed
 - Only test parameters stay generic in the procedure (SYM-9). A value that

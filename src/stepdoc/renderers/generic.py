@@ -11,13 +11,15 @@ from typing import Optional
 
 from .common import (
     Line,
+    branch_check,
+    branch_opening,
     Procedure,
     Record,
     action_line,
     check_line,
     line_body,
     procedure_doc,
-    procedure_lines,
+    path_lines,
     procedures,
     repeat_line,
     short_name,
@@ -84,7 +86,7 @@ def _follower(lines: list[str], members: list[Record]) -> Record:
     """The case whose procedure section is the variant's: a case that stopped
     early (a failure) follows a longer one (``procedures``)."""
     for case in members:
-        if procedure_lines(case, ("procedure",)) == lines:
+        if path_lines(case) == lines:
             return case
     return members[0]  # pragma: no cover - a variant's lines are one of its cases'
 
@@ -111,9 +113,28 @@ def _entries(entries: list[Record], section: str) -> list[Record]:
             # other children are part of the check (a composite's branches).
             if not e.get("each") and e.get("children"):
                 out[-1]["steps"] = [_node("check", check_line(c, True, 0), section) for c in e["children"]]
+            if e.get("branches"):  # CHK-12: every branch, the default last
+                out[-1]["branches"] = [_branch(b, i, section) for i, b in enumerate(e["branches"])]
         else:
             out.append(_node("action", action_line(e, True, 0), section))
     return out
+
+
+def _branch(b: Record, index: int, section: str) -> Record:
+    word, cond, label = branch_opening(b, index)
+    check = branch_check(b, True)
+    node: Record = {"if": word}
+    if cond:
+        node["condition"] = cond
+    if label and not b.get("default"):
+        node["branch_label"] = label
+    if check is not None:
+        line = check_line(check, True, 0)
+        line.number = None
+        node.update({k: v for k, v in _node("check", line, section).items() if k not in ("kind", "number", "section")})
+    elif b.get("source"):
+        node["source"] = b["source"]
+    return node
 
 
 def _step(s: Record, section: str) -> Record:

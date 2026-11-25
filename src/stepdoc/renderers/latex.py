@@ -287,6 +287,8 @@ class _Writer:
             if line.aside:
                 text += f" ({escape(' '.join(line.aside.split()))})"
             return text
+        if b.get("wording"):
+            return self._branch_check(b, b["wording"], True)
         if b.get("source"):
             return "Verify " + _code(b["source"])
         return r"\textit{a check made only when this branch is taken}"

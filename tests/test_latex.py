@@ -161,10 +161,11 @@ def test_procedure_lists_every_branch_once(tmp_path):
     assert tex.count(r"\begin{itemize}") == 1
 
 
-def test_procedure_takes_each_branch_from_the_case_that_built_it(tmp_path):
+def test_procedure_words_branches_no_case_built(tmp_path):
     tex = render(speed_run(tmp_path, ("fast",)), "procedure", "tex")
-    # Only the fast case ran: the other branches' checks were not built.
-    assert r"Else if \stepdocCode{mode == \char34{}slow\char34{}} (slow mode): Verify \stepdocCode{verify.greater\_equal(speed, 50, name=\char34{}Speed\char34{})}" in tex
+    # Only the fast case ran: the other branches' checks are worded from their source.
+    assert r"Else if \stepdocCode{mode == \char34{}slow\char34{}} (slow mode): Verify `Speed{'}: \stepdocCode{speed \char62{}= 50}" in tex
+    assert r"Otherwise: Verify `Speed{'}: \stepdocCode{speed == 40}" in tex
 
 
 def test_test_parameters_stay_generic_in_branches(tmp_path):

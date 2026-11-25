@@ -135,6 +135,7 @@ def _branch(b: Branch, ctx: _Ctx) -> dict[str, Any]:
         "default": b.default,
         "check": None if b.check is None else _check(b.check, ctx),
         **({} if b.source is None else {"source": b.source}),
+        **({} if b.wording is None else {"wording": _check(b.wording, ctx)}),
     }
 
 
